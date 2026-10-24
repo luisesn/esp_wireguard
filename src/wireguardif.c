@@ -266,8 +266,8 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 	size_t src_len;
 	struct pbuf *pbuf;
 	struct ip_hdr *iphdr;
-	ip_addr_t dest;
-	bool dest_ok = false;
+	ip_addr_t pkt_src;
+	bool src_ok = false;
 	int x;
 	uint32_t now;
 	uint16_t header_len = 0xFFFF;
@@ -321,13 +321,26 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 
 							// 4b. Otherwise, WireGuard checks to see if the source IP address of the plaintext inner-packet routes correspondingly in the cryptokey routing table
 							// Also check packet length!
+							//
+							// This is the cryptokey routing check: it must be done against the
+							// SOURCE address of the decrypted inner packet (iphdr->src), i.e.
+							// "did this peer's key authorize it to claim this source address",
+							// not the destination address. Checking the destination instead (as
+							// a prior version of this code did -- see CHANGES-fork.md) lets any
+							// connected peer spoof packets claiming to originate from any address
+							// in some *other* peer's allowed-ips range, as long as the packet's
+							// destination happened to land in an allowed range for the sending
+							// peer -- which defeats the point of cryptokey routing as an ingress
+							// filter. See the upstream WireGuard whitepaper section on
+							// cryptokey routing, and the wireguard-lwip fork that fixed the same
+							// bug: https://github.com/smartalock/wireguard-lwip (fork history).
 #if LWIP_IPV4
 							if (IPH_V(iphdr) == 4) {
-								ip_addr_copy_from_ip4(dest, iphdr->dest);
+								ip_addr_copy_from_ip4(pkt_src, iphdr->src);
 								for (x=0; x < WIREGUARD_MAX_SRC_IPS; x++) {
 									if (peer->allowed_source_ips[x].valid) {
-										if (ip_addr_netcmp(&dest, &peer->allowed_source_ips[x].ip, ip_2_ip4(&peer->allowed_source_ips[x].mask))) {
-											dest_ok = true;
+										if (ip_addr_netcmp(&pkt_src, &peer->allowed_source_ips[x].ip, ip_2_ip4(&peer->allowed_source_ips[x].mask))) {
+											src_ok = true;
 											header_len = PP_NTOHS(IPH_LEN(iphdr));
 											break;
 										}
@@ -337,15 +350,20 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 #endif /* LWIP_IPV4 */
 #if LWIP_IPV6
 							if (IPH_V(iphdr) == 6) {
-								// TODO: IPV6 support for route filtering
+								// TODO: IPv6 cryptokey routing is not implemented: any IPv6
+								// source address is accepted from a connected peer. This is a
+								// pre-existing gap (not introduced by the IPv4 fix above), and
+								// matches the IPv6 support being flagged elsewhere (README,
+								// CHANGES-fork.md) as alpha/unverified. Do not rely on IPv6
+								// ingress filtering until this is implemented.
 								header_len = PP_NTOHS(IPH_LEN(iphdr));
-								dest_ok = true;
+								src_ok = true;
 							}
 #endif /* LWIP_IPV6 */
 							if (header_len <= pbuf->tot_len) {
 
 								// 5. If the plaintext packet has not been dropped, it is inserted into the receive queue of the wg0 interface.
-								if (dest_ok) {
+								if (src_ok) {
 									// Send packet to be process by LWIP
 									ip_input(pbuf, device->netif);
 									// pbuf is owned by IP layer now
