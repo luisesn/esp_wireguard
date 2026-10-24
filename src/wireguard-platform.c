@@ -4,64 +4,40 @@
 #include <time.h>
 #include <inttypes.h>
 #include <lwip/sys.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/ctr_drbg.h>
+#include <psa/crypto.h>
 #include <esp_system.h>
 #include <esp_err.h>
 #include <esp_log.h>
 
 #include "crypto.h"
 
-#define ENTROPY_MINIMUM_REQUIRED_THRESHOLD	(134)
-#define ENTROPY_FUNCTION_DATA	NULL
-#define ENTROPY_CUSTOM_DATA		NULL
-#define ENTROPY_CUSTOM_DATA_LENGTH (0)
 #define TAG "wireguard-platform"
 
-static struct mbedtls_ctr_drbg_context random_context;
-static struct mbedtls_entropy_context entropy_context;
-
-static int entropy_hw_random_source( void *data, unsigned char *output, size_t len, size_t *olen ) {
-	esp_fill_random(output, len);
-	*olen = len;
-	return 0;
-}
-
+/* esp-idf >= 6.0 ships mbedtls 4 / TF-PSA-Crypto, which removed the legacy
+ * mbedtls_entropy_ and mbedtls_ctr_drbg_ API from its public headers (they
+ * are now internal driver plumbing under tf-psa-crypto/drivers/builtin).
+ * PSA Crypto's psa_generate_random() is the supported replacement and
+ * maintains its own global RNG, seeded from hardware entropy by esp-idf's
+ * mbedtls port -- no need to wire up esp_fill_random() as a custom entropy
+ * source here, unlike the upstream (pre-mbedtls-4) version of this file. */
 esp_err_t wireguard_platform_init() {
-	int mbedtls_err;
-	esp_err_t err;
-
-	mbedtls_entropy_init(&entropy_context);
-	mbedtls_ctr_drbg_init(&random_context);
-	mbedtls_err = mbedtls_entropy_add_source(
-			&entropy_context,
-			entropy_hw_random_source,
-			ENTROPY_FUNCTION_DATA,
-			ENTROPY_MINIMUM_REQUIRED_THRESHOLD,
-			MBEDTLS_ENTROPY_SOURCE_STRONG);
-	if (mbedtls_err != 0) {
-		ESP_LOGE(TAG, "mbedtls_entropy_add_source: %i", mbedtls_err);
-		err = ESP_FAIL;
-		goto fail;
+	psa_status_t status = psa_crypto_init();
+	if (status != PSA_SUCCESS) {
+		ESP_LOGE(TAG, "psa_crypto_init: %i", (int)status);
+		return ESP_FAIL;
 	}
-	mbedtls_err = mbedtls_ctr_drbg_seed(
-			&random_context,
-			mbedtls_entropy_func,
-			&entropy_context,
-			ENTROPY_CUSTOM_DATA,
-			ENTROPY_CUSTOM_DATA_LENGTH);
-	if (mbedtls_err != 0) {
-		ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed: %i", mbedtls_err);
-		err = ESP_FAIL;
-		goto fail;
-	}
-	err = ESP_OK;
-fail:
-	return err;
+	return ESP_OK;
 }
 
 void wireguard_random_bytes(void *bytes, size_t size) {
-	mbedtls_ctr_drbg_random(&random_context, bytes, size);
+	psa_status_t status = psa_generate_random((uint8_t *)bytes, size);
+	if (status != PSA_SUCCESS) {
+		/* wireguard_random_bytes() has no error return; this is used for
+		 * key material, so abort rather than silently hand back
+		 * unmodified (and possibly predictable) buffer contents. */
+		ESP_LOGE(TAG, "psa_generate_random: %i", (int)status);
+		abort();
+	}
 }
 
 uint32_t wireguard_sys_now() {

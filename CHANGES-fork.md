@@ -99,11 +99,42 @@ has the same bug — needs auditing in `src/wireguardif.c` /
   points at this fork.
 - README rewritten to describe the fork's scope and point at this file
   instead of claiming upstream's broader support matrix.
+- Installed `esp-idf 6.0.2` and built `examples/demo` for `esp32` end to
+  end (`idf.py build`, clean rebuild from `fullclean`): it now produces
+  `demo.bin` with no compiler warnings and no errors. This surfaced, and
+  this commit fixes, three things specific to `esp-idf 6.0`/mbedtls 4
+  that are independent of the `netif_add` crash (issue #1), which is a
+  *runtime* crash on real hardware and so could not be reproduced by a
+  build alone:
+  - `src/wireguard.c`: the four fixed-length protocol byte constants
+    (`CONSTRUCTION`, `IDENTIFIER`, `LABEL_MAC1`, `LABEL_COOKIE`) are
+    declared as `uint8_t[N]` initialized from a string literal exactly
+    `N` bytes long, i.e. with no room for a NUL terminator — intentional,
+    since they're used with `sizeof()`, never as C strings. The 6.0
+    toolchain's GCC treats that as an error
+    (`-Werror=unterminated-string-initialization`, new upstream in
+    GCC 13). Marked `__attribute__((nonstring))` on all four.
+  - `src/wireguard-platform.c`: rewritten to use PSA Crypto
+    (`psa_crypto_init()` / `psa_generate_random()`) instead of the
+    legacy `mbedtls_entropy_*`/`mbedtls_ctr_drbg_*` API, which `esp-idf
+    6.0`'s mbedtls 4 / TF-PSA-Crypto no longer exposes as public headers
+    (`mbedtls/entropy.h` now lives under
+    `tf-psa-crypto/drivers/builtin/include/mbedtls/private/`, i.e. it's
+    internal driver plumbing now). This is the mbedtls-4/PSA migration
+    anticipated during planning; it only touches this file; the
+    WireGuard crypto primitives themselves
+    (`src/crypto/refc/*`, `src/nacl/*`) are self-contained and untouched.
+  - `examples/demo/main/main.c`: `ESP_IF_WIFI_STA` was removed in
+    `esp-idf 6.0`; replaced with `WIFI_IF_STA` per the toolchain's own
+    hint.
+  - `examples/demo/main/sync_time.c`: switched from the deprecated
+    `sntp_*` function names to their `esp_sntp_*` replacements (the
+    header, `esp_sntp.h`, was already correct; only the four call sites
+    were on the deprecated names, which are warnings here, not build
+    failures, but worth cleaning up since Phase 1 explicitly names this).
 
 Not yet touched: `.github/workflows/*` (still targets the old version
-matrix; will be rewritten in Phase 6), `examples/demo/main/sync_time.c`
-(SNTP time sync — untouched, still relevant since the protocol still
-needs synced time).
+matrix; will be rewritten in Phase 6).
 
 ## Implementation plan
 
@@ -111,11 +142,12 @@ needs synced time).
       (no divergence at fork time). Licensing: BSD-3-Clause, kept as-is;
       `WireGuard` is a registered trademark — the brand notice in the
       README (inherited from upstream) stays.
-- [~] **Phase 1 — Baseline on 6.0.2.** Legacy code removed (this commit).
-      Still to do: install `esp-idf 6.0.2`, build `examples/demo`,
-      confirm it now fails *only* on the known `netif_add` crash (issue
-      #1 above), with no other warnings-as-errors breakage from the 6.0
-      toolchain (e.g. the `sntp.h` → `esp_sntp.h` rename).
+- [x] **Phase 1 — Baseline on 6.0.2.** `examples/demo` builds clean
+      (zero warnings, zero errors) for `esp32` on `esp-idf 6.0.2`. The
+      `netif_add` crash (issue #1) is a *runtime* crash — it was not,
+      and could not be, reproduced by this build-only verification; it
+      still needs to be checked on real hardware (or in Phase 2, once
+      the fix is in and can be tested against it directly).
 - [ ] **Phase 2 — Network interface and locking (blocking).** Fix issue
       #1 (netif/esp_netif registration) and #2 (tcpip_core locking)
       above. Exit criterion: 100 connect/disconnect cycles with no

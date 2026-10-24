@@ -46,10 +46,17 @@
 
 // 5.4 Messages
 // Constants
-static const uint8_t CONSTRUCTION[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s"; // The UTF-8 string literal "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s", 37 bytes of output
-static const uint8_t IDENTIFIER[34] = "WireGuard v1 zx2c4 Jason@zx2c4.com"; // The UTF-8 string literal "WireGuard v1 zx2c4 Jason@zx2c4.com", 34 bytes of output
-static const uint8_t LABEL_MAC1[8] = "mac1----"; // Label-Mac1 The UTF-8 string literal "mac1----", 8 bytes of output.
-static const uint8_t LABEL_COOKIE[8] = "cookie--"; // Label-Cookie The UTF-8 string literal "cookie--", 8 bytes of output
+// These four are fixed-length protocol byte strings, not C strings: they are
+// always used with sizeof(), never strlen()/strcmp(), and are intentionally
+// not NUL-terminated (CONSTRUCTION and IDENTIFIER are exactly as long as
+// their literal; LABEL_MAC1/LABEL_COOKIE are 8 bytes with no room for a
+// terminator either). `nonstring` tells the compiler that's deliberate, so
+// -Wunterminated-string-initialization (new in the esp-idf 6.0 toolchain's
+// GCC) doesn't flag them.
+static const uint8_t CONSTRUCTION[37] __attribute__((nonstring)) = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s"; // The UTF-8 string literal "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s", 37 bytes of output
+static const uint8_t IDENTIFIER[34] __attribute__((nonstring)) = "WireGuard v1 zx2c4 Jason@zx2c4.com"; // The UTF-8 string literal "WireGuard v1 zx2c4 Jason@zx2c4.com", 34 bytes of output
+static const uint8_t LABEL_MAC1[8] __attribute__((nonstring)) = "mac1----"; // Label-Mac1 The UTF-8 string literal "mac1----", 8 bytes of output.
+static const uint8_t LABEL_COOKIE[8] __attribute__((nonstring)) = "cookie--"; // Label-Cookie The UTF-8 string literal "cookie--", 8 bytes of output
 
 static const char *base64_lookup = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
