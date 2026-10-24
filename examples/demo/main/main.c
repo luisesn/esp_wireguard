@@ -29,13 +29,7 @@
 #define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define EXAMPLE_ESP_MAXIMUM_RETRY  CONFIG_ESP_MAXIMUM_RETRY
 
-#if defined(CONFIG_IDF_TARGET_ESP8266)
 #include <esp_netif.h>
-#elif ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 2, 0)
-#include <tcpip_adapter.h>
-#else
-#include <esp_netif.h>
-#endif
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
@@ -109,76 +103,6 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-#ifdef CONFIG_WIREGUARD_ESP_TCPIP_ADAPTER
-static esp_err_t wifi_init_tcpip_adaptor(void)
-{
-    esp_err_t err = ESP_FAIL;
-    s_wifi_event_group = xEventGroupCreate();
-
-    tcpip_adapter_init();
-
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .password = EXAMPLE_ESP_WIFI_PASS
-        },
-    };
-
-    /* Setting a password implies station will connect to all security modes including WEP/WPA.
-        * However these modes are deprecated and not advisable to be used. Incase your Access point
-        * doesn't support WPA2, these mode can be enabled by commenting below line */
-
-    if (strlen((char *)wifi_config.sta.password)) {
-        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
-    ESP_ERROR_CHECK(esp_wifi_start() );
-
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
-
-    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
-     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
-
-    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
-     * happened. */
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s", EXAMPLE_ESP_WIFI_SSID);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s", EXAMPLE_ESP_WIFI_SSID);
-        err = ESP_FAIL;
-        goto fail;
-    } else {
-        ESP_LOGE(TAG, "Unknown event");
-        err = ESP_FAIL;
-        goto fail;
-    }
-
-    ESP_ERROR_CHECK(esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler));
-    ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler));
-    vEventGroupDelete(s_wifi_event_group);
-
-    err = ESP_OK;
-fail:
-    return err;
-}
-#endif // CONFIG_WIREGUARD_ESP_TCPIP_ADAPTER
-
-#ifdef CONFIG_WIREGUARD_ESP_NETIF
 static esp_err_t wifi_init_netif(void)
 {
     esp_err_t err = ESP_FAIL;
@@ -264,16 +188,10 @@ static esp_err_t wifi_init_netif(void)
 fail:
     return err;
 }
-#endif // CONFIG_WIREGUARD_ESP_NETIF
 
 static esp_err_t wifi_init_sta(void)
 {
-#if defined(CONFIG_WIREGUARD_ESP_TCPIP_ADAPTER)
-    return wifi_init_tcpip_adaptor();
-#endif
-#if defined(CONFIG_WIREGUARD_ESP_NETIF)
     return wifi_init_netif();
-#endif
 }
 static void test_on_ping_success(esp_ping_handle_t hdl, void *args)
 {
@@ -353,11 +271,7 @@ void app_main(void)
     esp_log_level_set("wireguardif", ESP_LOG_DEBUG);
     esp_log_level_set("wireguard", ESP_LOG_DEBUG);
     err = nvs_flash_init();
-#if defined(CONFIG_IDF_TARGET_ESP8266) && ESP_IDF_VERSION <= ESP_IDF_VERSION_VAL(3, 4, 0)
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
-#else
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-#endif
       ESP_ERROR_CHECK(nvs_flash_erase());
       err = nvs_flash_init();
     }

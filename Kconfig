@@ -1,13 +1,13 @@
 menu "WireGuard"
 
-choice WIREGUARD_ESP_ADAPTER_SELECTION
-    prompt "TCP/IP adapter to use"
-    default WIREGUARD_ESP_NETIF
-    config WIREGUARD_ESP_TCPIP_ADAPTER
-        bool "TCP/IP Adapter (pre esp-idf v4.1, ESP8266 RTOS SDK)"
-    config WIREGUARD_ESP_NETIF
-        bool "ESP-NETIF"
-endchoice
+# esp_wireguard targets esp-idf >= 6.0 only. ESP-NETIF is the only
+# supported TCP/IP adapter; the legacy TCP/IP Adapter (pre esp-idf
+# v4.1, ESP8266 RTOS SDK) choice has been removed. CONFIG_WIREGUARD_ESP_NETIF
+# is kept (always on) so existing #if defined(CONFIG_WIREGUARD_ESP_NETIF)
+# guards elsewhere keep working.
+config WIREGUARD_ESP_NETIF
+    bool
+    default y
 
 config WIREGUARD_MAX_PEERS
     int "Max number of peers"

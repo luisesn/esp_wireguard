@@ -1,39 +1,41 @@
 # `esp_wireguard`, WireGuard Implementation for ESP-IDF
 
-This is an implementation of the [WireGuard&reg;](https://www.wireguard.com/)
-for ESP-IDF, based on
+This is a fork of
+[trombik/esp_wireguard](https://github.com/trombik/esp_wireguard), itself
+an implementation of the [WireGuard&reg;](https://www.wireguard.com/)
+protocol for ESP-IDF, based on
 [WireGuard Implementation for lwIP](https://github.com/smartalock/wireguard-lwip).
 
-[![Build examples](https://github.com/trombik/esp_wireguard/actions/workflows/build.yml/badge.svg)](https://github.com/trombik/esp_wireguard/actions/workflows/build.yml)
+This fork narrows the scope to `esp-idf` `>= 6.0` and the `esp32` chip
+family (`esp32`, `esp32s2`, `esp32s3`, `esp32c3`), in exchange for dropping
+support for `esp-idf` `4.x`/`5.x` and the ESP8266 RTOS SDK. See
+[CHANGES-fork.md](CHANGES-fork.md) for what has changed and why, and the
+upstream project above for the general-purpose version.
 
 ## Status
 
-The code is alpha.
+The code is alpha. This fork has not yet been verified to build or run; see
+[CHANGES-fork.md](CHANGES-fork.md) for current progress.
 
-A single tunnel to a WireGuard peer has been working.
+A single tunnel to a WireGuard peer has been working in upstream.
 
 ## Supported ESP-IDF versions and targets
 
 The following ESP-IDF versions are supported:
 
-* `esp-idf` `master`
-* `esp-idf` `v4.2.x`
-* `esp-idf` `v4.3.x`
-* `esp-idf` `v4.4.x`
-* ESP8266 RTOS SDK `v3.4`
+* `esp-idf` `>= 6.0`
 
 The following targets are supported:
 
 * `esp32`
 * `esp32s2`
+* `esp32s3`
 * `esp32c3`
-* `esp8266`
 
 ## Usage
 
-In `menuconfig` under `WireGuard`, choose a TCP/IP adapter. The default is
-`ESP-NETIF`. SDKs older than `esp-idf` `v4.1`, including ESP8266 RTOS SDK v3.4
-requires `TCP/IP Adapter`.
+`ESP-NETIF` is the only TCP/IP adapter; there is nothing to choose in
+`menuconfig`.
 
 Both peers must have synced time. The library does not sync time.
 
@@ -118,9 +120,6 @@ transport. The chosen transport must be available and usable.
 
 The library assumes the interface is WiFi interface. Ethernet is not
 supported.
-
-Older `esp-idf` versions with `TCP/IP Adapter`, such as v4.1.x, should work,
-but there are others issues, not directly related to the library.
 
 ## License
 
