@@ -9,6 +9,60 @@ config WIREGUARD_ESP_NETIF
     bool
     default y
 
+# Work around a type-confusion bug between this component and esp_netif.
+#
+# This component registers a raw lwIP netif with netif_add(), bypassing
+# esp_netif entirely (wg_netif_struct.state starts out pointing at a
+# `struct wireguardif_init_data` on the caller's stack, and is later
+# replaced by wireguardif_init() with a `struct wireguard_device *`; it
+# is never an `esp_netif_t *`).
+#
+# netif_add() calls netif_set_addr() *before* invoking the netif's own
+# init callback (wireguardif_init()). When a real (non-zero) IP address
+# is assigned -- which esp_wireguard_netif_create() always does --
+# netif_set_addr() fires lwIP's ext-callback chain with a
+# LWIP_NSC_IPV4_*_CHANGED reason. esp_netif's netif_callback_fn()
+# (components/esp_netif/lwip/esp_netif_lwip.c) is registered globally
+# for *every* lwIP netif via netif_add_ext_callback(), so it also runs
+# for this one. It reacts to that reason by calling
+# lwip_get_esp_netif(netif), which, when LWIP_ESP_NETIF_DATA==0 (the
+# esp-idf default), is simply `(esp_netif_t *)netif->state`.
+#
+# At the point netif_set_addr() runs, netif->state is still the
+# `struct wireguardif_init_data *` that esp_wireguard_netif_create()
+# put there -- not an esp_netif_t -- so esp_netif's callback
+# dereferences it as one (esp_netif->ip_info, esp_netif->last_status_up,
+# ...) and corrupts memory / crashes. This matches the netif_add crash
+# reported against the upstream project.
+#
+# Selecting ESP_NETIF_BRIDGE_EN forces LWIP_ESP_NETIF_DATA to 1
+# (see components/lwip/port/include/lwipopts.h), which makes
+# lwip_get_esp_netif() read the esp-netif pointer from lwIP's
+# `netif->client_data[]` array (via netif_get_client_data()) instead of
+# overloading `netif->state`. Since this WireGuard netif was never
+# registered through esp_netif, its client_data slot is simply NULL,
+# lwip_get_esp_netif() returns NULL, and esp_netif's callback safely
+# no-ops (`if (esp_netif) { ... }`) instead of misinterpreting
+# netif->state.
+#
+# This is a minimal, build-verified workaround, not a "real" fix: it
+# piggybacks on a Kconfig option named for an unrelated feature (the
+# lwIP bridge) purely for its side effect on LWIP_ESP_NETIF_DATA, and it
+# does not make this netif an actual esp_netif (events such as
+# IP_EVENT_STA_GOT_IP still won't fire for it; use the peer-up callback
+# / esp_wireguardif_peer_is_up() instead). Registering this interface
+# as a proper esp_netif with a custom driver would be the "correct" fix,
+# and remains a possible future improvement (see CHANGES-fork.md).
+#
+# NOTE: this is a compile-time/config fix, verified only by inspecting
+# the esp-idf 6.0.2 source (components/esp_netif/lwip/esp_netif_lwip.c,
+# components/lwip/port/include/lwipopts.h) and by a clean rebuild of
+# examples/demo. It has NOT been verified on real hardware.
+config WIREGUARD_WORKAROUND_ESP_NETIF_TYPE_CONFUSION
+    bool
+    default y
+    select ESP_NETIF_BRIDGE_EN
+
 config WIREGUARD_MAX_PEERS
     int "Max number of peers"
     default 1
