@@ -186,6 +186,73 @@ passed the timestamp-replay check was accepted, however frequent),
 except for one tick right at a ~49.7-day uint32 ms wraparound, where it
 would spuriously fire. Fixed by swapping the subtraction order.
 
+### 5. TAI64N timestamp has no persistence across reboots — design decision needed, not yet fixed
+
+`wireguard_tai64n_now()` (`src/wireguard-platform.c`) builds the
+handshake-initiation timestamp from `gettimeofday()`, i.e. the libc wall
+clock. The ESP32 has no battery-backed RTC, so this clock resets to
+(effectively) the epoch on every reboot and only becomes meaningful again
+once `examples/demo`'s `obtain_time()` (SNTP) completes.
+
+This matters because of the anti-replay check on the *responder* side of
+a handshake initiation — `wireguard_process_initiation_message()` in
+`src/wireguard.c` (line ~621): `replay = memcmp(t, peer->greatest_timestamp,
+...) <= 0`. A new initiation's timestamp must be strictly greater than the
+highest one previously seen from that peer, or it's rejected as a replay.
+When this fork's ESP32 is the *initiator* (the normal case here), that
+check runs on the remote hub, not on the ESP32 — but the hub's
+`greatest_timestamp` high-water-mark for this peer only ever moves
+forward, while the ESP32's clock resets on every reboot. If the ESP32
+reconnects before `obtain_time()` has actually synced (SNTP failed, no
+network yet, or the application just doesn't call it), it will send a
+timestamp *lower* than the hub's high-water mark, and the hub will
+silently reject the handshake — a confusing failure that looks identical
+to "wrong keys" or "no connectivity" unless you know to suspect the clock.
+(The same class of problem also exists in the other direction, for
+`greatest_timestamp` tracked *inside* this codebase's own `peer` struct,
+should the remote end ever initiate a handshake to the ESP32 instead of
+the reverse — same root cause, same fix.)
+
+This is a known gap in the upstream code too, not something introduced by
+this fork: there's a `// TODO: Need to notify if the higher layers want to
+persist latest timestamp/nonce somewhere` immediately after the
+`greatest_timestamp` update in `wireguard_process_initiation_message()`.
+
+Candidate fixes, roughly in order of effort:
+
+1. **Do nothing to the clock; make the failure visible instead.** Have
+   the application (or a small helper this library exposes) refuse to
+   call `esp_wireguard_connect()` — or at least log a clear warning —
+   until SNTP has actually reported success, rather than silently
+   proceeding with an unsynced clock as `examples/demo/main/main.c`
+   currently does. Cheapest, but doesn't fix reconnects where SNTP is
+   briefly unavailable right after a reboot (e.g. WiFi not up yet).
+2. **Persist a high-water-mark wall-clock value in NVS.** On each
+   successful handshake (or periodically), save the current `time()` to
+   NVS. On boot, before any connection attempt, seed the clock
+   (`settimeofday()`) to at least that persisted value — this guarantees
+   monotonicity across reboots without needing a real RTC or even a
+   successful SNTP sync, since TAI64N only needs to be non-decreasing and
+   roughly plausible, not exactly correct to the second. Layer SNTP on
+   top as normal once/if the network comes up, since real NTP time will
+   always be >= the persisted floor anyway. This is the fix I'd actually
+   recommend; it's a moderate change (needs `nvs_flash` as a dependency
+   of this component, not just the example) but directly closes the gap
+   rather than papering over it.
+3. **A battery-backed or supercap RTC module** (e.g. DS3231) wired to the
+   ESP32, read at boot before anything else. Solves it at the hardware
+   level instead of software, but is a hardware BOM change, not something
+   this library can do on its own, and is overkill if (2) is acceptable.
+
+Leaning towards (2) as the one worth implementing, with (1) as a cheap
+complementary safety net regardless (surfacing the failure clearly is
+good practice even once (2) exists, for the case where NVS itself is
+freshly erased). Not implemented yet — flagging here for a decision
+before touching `wireguard-platform.c`, since it adds a dependency
+(`nvs_flash`) this component doesn't currently have, and changing it
+while hardware testing is in progress on the exact connect/disconnect
+path this touches would make that test's results harder to attribute.
+
 ## What's been done
 
 - Removed ESP8266 RTOS SDK and the pre-4.1 "TCP/IP Adapter" code paths
@@ -333,8 +400,8 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
       alone since fixing it means widening the bitmap type and isn't
       cheap to verify without hardware to generate real reordering.
       Still open: TAI64N timestamp source/monotonicity across reboots
-      (ties into the "no RTC, no synced time at boot" problem noted
-      elsewhere — needs a design decision, not just an audit), cookie
+      (issue #5 above — root-caused, candidate fixes written up, waiting
+      on a decision before touching `wireguard-platform.c`), cookie
       reply handling under load (untested — `wireguard_is_under_load()`
       in `wireguard-platform.c` always returns `false`, so the
       DoS-mitigation cookie path is never exercised; fine for a
