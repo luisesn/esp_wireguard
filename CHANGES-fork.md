@@ -220,9 +220,18 @@ matrix; will be rewritten in Phase 6).
       in `wireguard-platform.c` always returns `false`, so the
       DoS-mitigation cookie path is never exercised; fine for a
       single-peer point-to-point tunnel per the original scope, but
-      worth a comment saying so explicitly), and host-side test vectors
-      for ChaCha20-Poly1305 / X25519 / BLAKE2s (not started) and fuzzing
-      of the packet parser (not started).
+      worth a comment saying so explicitly). Host-side test vectors for
+      ChaCha20-Poly1305 / X25519 / BLAKE2s: **done** — see
+      `host-tests/` (native `gcc` build, no ESP-IDF/hardware needed;
+      `make check`). All three primitives cross-checked against
+      independent reference implementations (Python's `hashlib.blake2s`,
+      and the `cryptography` package for X25519 and the AEAD
+      construction in this codebase's actual 64-bit-counter nonce
+      convention) rather than hand-copied published constants — see
+      `host-tests/README.md` for why. 34/34 checks pass, including
+      tamper-rejection of the AEAD tag, and a clean run under
+      ASan+UBSan (`make asan`). Still open: fuzzing of the packet
+      parser (not started).
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
       echo testing, 24h soak test across rekeys and WiFi drops,
       measurement-driven optimization only (no speculative tuning).
