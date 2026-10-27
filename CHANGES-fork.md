@@ -42,7 +42,7 @@ should fix, so it is on library authors to work around.
 
 ## Known issues
 
-### 1. `netif_add()` crash on `esp-idf >= 5.x` — root cause confirmed, fix drafted (Phase 2 branch)
+### 1. `netif_add()` crash on `esp-idf >= 5.x` — root cause confirmed, fix verified on real hardware
 
 Confirmed by reading the `esp-idf 6.0.2` source
 (`components/esp_netif/lwip/esp_netif_lwip.c`,
@@ -78,10 +78,10 @@ this netif is never registered with `esp_netif` at all — so
 `esp_netif->last_status_up`, etc. on a completely unrelated struct. This
 is the crash reported upstream.
 
-**Fix (drafted, build-verified, not yet hardware-verified — see Phase 2
-branch `phase2-netif-locking-fix`):** of the two options previously
-listed here, option 2 (narrower, not the "proper" esp_netif-driver
-route) turned out to have a clean, minimal form: `Kconfig` now has
+**Fix (verified on real hardware — see "Hardware verification" below):**
+of the two options previously listed here, option 2 (narrower, not the
+"proper" esp_netif-driver route) turned out to have a clean, minimal
+form: `Kconfig` now has
 `WIREGUARD_WORKAROUND_ESP_NETIF_TYPE_CONFUSION`, which `select`s
 `ESP_NETIF_BRIDGE_EN` purely for its side effect of forcing
 `LWIP_ESP_NETIF_DATA=1`. With that, `lwip_get_esp_netif()` reads the
@@ -100,7 +100,7 @@ the architecturally cleaner option and remains a possible future
 improvement; it was not needed to resolve the crash and is considerably
 more invasive, so it was not attempted for this first landing.
 
-### 2. No `tcpip_thread` marshaling — fixed (Phase 2 branch)
+### 2. No `tcpip_thread` marshaling — fixed, hardware-exercised (see below)
 
 Every public `esp_wireguard_*()` entry point in `src/esp_wireguard.c`
 called lwIP's `netif`/`wireguardif` API (`netif_add`, `netif_remove`,
@@ -260,17 +260,33 @@ matrix; will be rewritten in Phase 6).
 - Rebuilt `examples/demo` from `fullclean`: still builds with no
   warnings, no errors, on `esp-idf 6.0.2` for `esp32`.
 
-**This branch is build-verified only.** Nothing here has been run on
-real ESP32 hardware yet. In particular: issue #1's fix is reasoned from
-reading the `esp-idf` source (cited above) for exactly the fields and
-call order involved, but a crash that occurs through an ext-callback
-side effect is the kind of thing that is easy to get subtly wrong in
-ways a clean compile can't catch; issue #2's fix removes a race whose
-absence can't be proven by a short test run, only made overwhelmingly
-less likely. Before trusting or merging this branch: flash
-`examples/demo`, run repeated connect/disconnect cycles (the Phase 2
-exit criterion below), and ideally also traffic concurrently with
-connect/disconnect to exercise the race that issue #2 addresses.
+### Hardware verification (branch `hwtest-phase2-phase3`, merges Phase 2 + Phase 3)
+
+Tested by Luis on real ESP32 hardware, 2026-10-27, `esp-idf 6.1` (newer
+than the `6.0.2` this was built against, confirming it also holds on a
+newer `6.x`), against his own WireGuard hub at `norsip.com`:
+
+- `netif_add()` did **not** crash — issue #1's fix holds. The boot log
+  goes straight through `esp_wireguard_netif_create()` →
+  `wireguardif_add_peer()` → `wireguardif_connect()` with no fault.
+- First attempt still showed the peer never completing a handshake
+  (`wg show` on the server had no `endpoint`/`latest handshake`/
+  `transfer` at all for this peer), traced to a misconfigured
+  `WG_PEER_PUBLIC_KEY` in the example's `menuconfig` (the ESP32's own
+  keypair was correct; the server's public key entered on the ESP32
+  side was not). Not a bug in this fork — a reminder that the demo's
+  `menuconfig` defaults are placeholders and every `WG_*` value must be
+  filled in for the actual peer.
+- After correcting that: handshake completed (`demo: Peer is up`),
+  ping over the tunnel succeeded 10/10 (`ping 10.252.1.1`, ~33ms), and
+  the demo's own disconnect/reconnect loop ran `esp_wireguard_disconnect()`
+  (which also goes through the new `tcpip_api_call()` marshaling) with
+  no crash.
+- Not yet observed: a full reconnect back to "Peer is up" after a
+  disconnect (the log sample ends mid-wait), and the Phase 2 exit
+  criterion's 100 connect/disconnect cycles — still worth letting it run
+  longer to build confidence, but the two issues this branch set out to
+  fix are now confirmed fixed, not just reasoned from source.
 
 ## Implementation plan
 
@@ -286,11 +302,14 @@ connect/disconnect to exercise the race that issue #2 addresses.
       the fix is in and can be tested against it directly).
 - [~] **Phase 2 — Network interface and locking (blocking).** Issue #1
       (netif/esp_netif type confusion) and #2 (no tcpip_thread
-      marshaling) both root-caused against the `esp-idf 6.0.2` source and
-      fixed in branch `phase2-netif-locking-fix` (see above); build
-      clean. **Not yet merged — needs hardware verification first.**
-      Exit criterion (unchanged, still open): 100 connect/disconnect
-      cycles on real hardware with no crash, no assert, no leak.
+      marshaling) both root-caused against the `esp-idf` source, fixed in
+      branch `phase2-netif-locking-fix`, and **confirmed fixed on real
+      ESP32 hardware** (`esp-idf 6.1`, see "Hardware verification"
+      above): no `netif_add` crash, handshake completes, ping over the
+      tunnel works, disconnect ran without crash. Not yet merged into
+      `idf6-baseline`/`main` — still want the exit criterion below met
+      first. Exit criterion (still open): 100 connect/disconnect cycles
+      on real hardware with no crash, no assert, no leak.
 - [~] **Phase 3 — Core audit.** Done so far, by manual review (not yet
       hardware-tested, but all of it builds clean — see commit):
       cryptokey routing direction (issue #3, confirmed + fixed),
