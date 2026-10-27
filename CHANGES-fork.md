@@ -466,6 +466,19 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
       echo testing, 24h soak test across rekeys and WiFi drops,
       measurement-driven optimization only (no speculative tuning).
+      Started: the WireGuard interface MTU (`WIREGUARDIF_MTU`, previously
+      hardcoded to 1420) is now `CONFIG_WIREGUARD_MTU`, still defaulting
+      to 1420 — this is groundwork (a knob to turn), not a tuning result;
+      see Kconfig's help text for how to actually pick a value from a
+      measurement of the real path, rather than guessing. Still open,
+      and blocked on real hardware + a real network path rather than
+      something that can be done from this environment alone:
+      MTU/MSS measurement against the actual deployment (home connection
+      vs. cellular, etc.), throughput testing (`iperf`/HTTP/TCP echo —
+      no test tooling exists in `examples/demo` yet; needs a decision on
+      approach, e.g. the esp-idf `iperf` managed component vs. a small
+      custom TCP echo client/server, before building one out), and the
+      24h soak test itself.
 - [ ] **Phase 5 — Public API.** `esp_event` events (handshake done, peer
       down, session expired) instead of polling; auto-reconnect on IP
       recovery; endpoint re-resolution on reconnect (currently only
