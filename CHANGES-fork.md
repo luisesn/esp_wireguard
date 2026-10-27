@@ -479,6 +479,31 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
       approach, e.g. the esp-idf `iperf` managed component vs. a small
       custom TCP echo client/server, before building one out), and the
       24h soak test itself.
+
+  Test plan (decided): the ESP32 has no shell, so some test tooling has
+  to run in `examples/demo` regardless of what's on the hub -- the user
+  has full control of the Linux hub and can install whatever's needed
+  there. Chosen approach: esp-idf's own `iperf` managed component on the
+  ESP32 side (speaks the classic iperf2 wire protocol), paired with
+  `iperf2` (the classic `iperf` package, *not* `iperf3` -- the two are
+  not wire-compatible) on the hub. Not yet implemented in
+  `examples/demo`.
+
+  1. **Path MTU check.** From the hub, `ping -M do -s <size>
+     <esp32-tunnel-ip>` (over the tunnel), sweeping `<size>` down from
+     ~1452 (1420 configured WG MTU - 28 bytes of ICMP+IPv4 header) until
+     it stops needing fragmentation, to confirm the default 1420 doesn't
+     already need lowering for this specific network path (home
+     WiFi/broadband, not cellular, so likely fine, but worth confirming
+     rather than assuming).
+  2. **Throughput.** `iperf -s` (iperf2) on the hub; the ESP32 runs the
+     `iperf` component as a client against it (and, separately, as a
+     server with the hub as client, to test both directions).
+  3. **24h soak.** A long-lived TCP connection (or periodic iperf runs)
+     held across at least one WireGuard rekey (`REKEY_AFTER_TIME` =
+     120s, so trivial to hit) and at least one real WiFi drop/reconnect,
+     watching for the connection surviving, stalling, or needing an
+     application-level reconnect.
 - [ ] **Phase 5 — Public API.** `esp_event` events (handshake done, peer
       down, session expired) instead of polling; auto-reconnect on IP
       recovery; endpoint re-resolution on reconnect (currently only
