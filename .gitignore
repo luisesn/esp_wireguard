@@ -4,3 +4,8 @@
 /examples/*/sdkconfig.*
 /examples/*/.vagrant/
 /examples/*/dependencies.lock
+/host-tests/fuzz/fuzz_wireguard
+/host-tests/fuzz/corpus*
+/host-tests/fuzz/crash-*
+/host-tests/fuzz/leak-*
+/host-tests/fuzz/timeout-*
