@@ -4,3 +4,5 @@
 /examples/*/sdkconfig.*
 /examples/*/.vagrant/
 /examples/*/dependencies.lock
+/host-tests/test_crypto
+/host-tests/test_crypto_asan

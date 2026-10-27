@@ -32,6 +32,8 @@
 #include <assert.h>
 #include <string.h>
 #include <inttypes.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <lwip/ip.h>
 #include <lwip/netdb.h>
 #include <lwip/err.h>
@@ -234,6 +236,33 @@ esp_err_t esp_wireguard_connect(wireguard_ctx_t *ctx)
     if (!ctx) {
         err = ESP_ERR_INVALID_ARG;
         goto fail;
+    }
+
+    /* Wait for a plausible clock before sending anything. The ESP32 has no
+     * RTC, so without this, a handshake sent right after boot (before
+     * SNTP -- or whatever the application uses -- has set the clock) can
+     * carry a TAI64N timestamp lower than one the peer has already seen
+     * from an earlier boot, and get silently rejected as a replay. This
+     * runs on every call (first connect and later reconnects alike),
+     * since a reconnect after a reboot hits the same unset-clock window.
+     * See CHANGES-fork.md, issue #5, for the full writeup. */
+    {
+        uint32_t waited_ms = 0;
+        const uint32_t timeout_ms = CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS;
+        const uint32_t poll_ms = CONFIG_WIREGUARD_TIME_SYNC_POLL_INTERVAL_MS;
+
+        while (!wireguard_platform_time_is_synced()) {
+            if (waited_ms >= timeout_ms) {
+                ESP_LOGE(TAG, "esp_wireguard_connect: clock not synced after %" PRIu32 "ms, giving up", waited_ms);
+                err = ESP_ERR_TIMEOUT;
+                goto fail;
+            }
+            if (waited_ms == 0) {
+                ESP_LOGI(TAG, "esp_wireguard_connect: waiting for the clock to sync before connecting");
+            }
+            vTaskDelay(pdMS_TO_TICKS(poll_ms));
+            waited_ms += poll_ms;
+        }
     }
 
     if (ctx->netif == NULL) {

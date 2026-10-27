@@ -62,4 +62,16 @@ void wireguard_tai64n_now(uint8_t *output) {
 bool wireguard_is_under_load() {
 	return false;
 }
+
+/* 2024-01-01T00:00:00Z. Any correctly-set clock will be well past this;
+ * an unset ESP32 clock (no RTC) reads near the Unix epoch (1970) until
+ * something -- normally SNTP -- sets it. This is a floor, not a
+ * freshness check: it doesn't detect a clock that is merely wrong, only
+ * one that was obviously never set at all. Bump it forward over time if
+ * this project is still around long after the date below. */
+#define WIREGUARD_PLAUSIBLE_TIME_FLOOR ((time_t)1704067200)
+
+bool wireguard_platform_time_is_synced() {
+	return time(NULL) >= WIREGUARD_PLAUSIBLE_TIME_FLOOR;
+}
 // vim: noexpandtab

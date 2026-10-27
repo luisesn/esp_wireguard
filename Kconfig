@@ -22,6 +22,33 @@ config MAX_INITIATIONS_PER_SECOND
     default 2
     help
         Per device limit on accepting (valid) initiation requests - per peer.
+
+config WIREGUARD_TIME_SYNC_TIMEOUT_MS
+    int "Milliseconds to wait for a plausible clock before connecting"
+    default 30000
+    help
+        The ESP32 has no battery-backed RTC, so its clock reads near the
+        Unix epoch after every reboot until something (normally SNTP) sets
+        it. WireGuard's handshake replay protection requires each peer's
+        initiation timestamp to strictly increase, so sending a handshake
+        before the clock is set risks sending a timestamp lower than one a
+        peer has already seen, and being silently rejected as a replay.
+
+        esp_wireguard_connect() polls wireguard_platform_time_is_synced()
+        and waits (in CONFIG_WIREGUARD_TIME_SYNC_POLL_INTERVAL_MS steps)
+        for up to this long before giving up and returning ESP_ERR_TIMEOUT,
+        instead of sending a handshake with an unset clock. It does not
+        start SNTP itself; the application is still responsible for that
+        (see examples/demo/main/sync_time.c) -- this only waits for it to
+        finish.
+
+config WIREGUARD_TIME_SYNC_POLL_INTERVAL_MS
+    int "Milliseconds between clock checks while waiting to connect"
+    default 500
+    help
+        How often esp_wireguard_connect() re-checks the clock while
+        waiting for it to become plausible. See
+        CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS.
 choice WIREGUARD_x25519_IMPLEMENTATION
     prompt "x25519 implementation to use"
     default WIREGUARD_x25519_IMPLEMENTATION_DEFAULT

@@ -71,6 +71,23 @@ void wireguard_tai64n_now(uint8_t *output);
 // Is the system under load - i.e. should we generate cookie reply message in response to initiation messages
 bool wireguard_is_under_load();
 
+// Has the platform clock been set to a plausible wall-clock time (e.g. via SNTP)?
+//
+// The ESP32 has no battery-backed RTC, so wireguard_tai64n_now() resets to
+// (effectively) the Unix epoch on every reboot until something sets the
+// clock. WireGuard's handshake replay protection requires each peer's
+// initiation timestamp to strictly increase, so sending a handshake before
+// the clock is set can produce a timestamp lower than one a peer has
+// already seen from a previous boot, and get silently rejected as a
+// replay. esp_wireguard_connect() uses this to wait for the clock before
+// sending anything, rather than let that happen.
+//
+// This is a coarse sanity check (current time is after a fixed, hardcoded
+// floor well in the past relative to this check being written), not proof
+// that the clock is *correct* -- it can't be, without trusting something
+// external. It only rules out "obviously never set".
+bool wireguard_platform_time_is_synced();
+
 #ifdef __cplusplus
 }
 #endif
