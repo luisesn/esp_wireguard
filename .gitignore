@@ -6,3 +6,8 @@
 /examples/*/dependencies.lock
 /host-tests/test_crypto
 /host-tests/test_crypto_asan
+/host-tests/fuzz/fuzz_wireguard
+/host-tests/fuzz/corpus*
+/host-tests/fuzz/crash-*
+/host-tests/fuzz/leak-*
+/host-tests/fuzz/timeout-*
