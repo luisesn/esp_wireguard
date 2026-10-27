@@ -282,11 +282,14 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
   the demo's own disconnect/reconnect loop ran `esp_wireguard_disconnect()`
   (which also goes through the new `tcpip_api_call()` marshaling) with
   no crash.
-- Not yet observed: a full reconnect back to "Peer is up" after a
-  disconnect (the log sample ends mid-wait), and the Phase 2 exit
-  criterion's 100 connect/disconnect cycles — still worth letting it run
-  longer to build confidence, but the two issues this branch set out to
-  fix are now confirmed fixed, not just reasoned from source.
+- Follow-up log confirms two full reconnect cycles (disconnect → 10s
+  idle, pings timing out as expected → connect → handshake →
+  "Peer is up" → pings succeeding again at ~33ms), each clean, no
+  crash, no leak symptom. The two issues this branch set out to fix are
+  now confirmed fixed on real hardware, not just reasoned from source.
+  Still open: the Phase 2 exit criterion's full 100 connect/disconnect
+  cycles (only 2 observed so far) — worth a longer unattended soak run
+  before calling Phase 2 done and merging into `idf6-baseline`/`main`.
 
 ## Implementation plan
 
