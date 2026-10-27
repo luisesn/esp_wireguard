@@ -619,7 +619,17 @@ struct wireguard_peer *wireguard_process_initiation_message(struct wireguard_dev
 
 					// Check that timestamp is increasing and we haven't had too many initiations (should only get one per peer every 5 seconds max?)
 					replay = (memcmp(t, peer->greatest_timestamp, WIREGUARD_TAI64N_LEN) <= 0); // tai64n is big endian so we can use memcmp to compare
-					rate_limit = (peer->last_initiation_rx - now) < (1000 / MAX_INITIATIONS_PER_SECOND);
+					// Rate limit is "time since the last accepted initiation from this peer
+					// is below the minimum interval" -- i.e. now - last_initiation_rx, not
+					// last_initiation_rx - now. Both sides are uint32_t millisecond
+					// timestamps and now >= last_initiation_rx in the normal case, so the
+					// original (reversed) subtraction wrapped around to a huge unsigned
+					// value that was essentially never below the threshold: the per-peer
+					// initiation rate limit was silently a no-op except right at a 32-bit
+					// ms wraparound (~49.7 days of uptime), which made it rate_limit=true
+					// for one tick instead of enforcing the interval. See
+					// CHANGES-fork.md for the audit this was found under.
+					rate_limit = (now - peer->last_initiation_rx) < (1000 / MAX_INITIATIONS_PER_SECOND);
 
 					if (!replay && !rate_limit) {
 						// Success! Copy everything to peer

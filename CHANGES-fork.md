@@ -7,6 +7,15 @@ the conventional sense (no version numbers per entry); it exists so future
 work — by Luis or by Claude in a later session — has context without
 re-deriving it from the commit history.
 
+> **Branch note:** `hwtest-phase2-phase3` merges `phase2-netif-locking-fix`
+> (the netif/esp_netif crash fix + tcpip_thread marshaling) and
+> `phase3-cryptokey-routing-audit` (the cryptokey-routing and
+> handshake-rate-limit fixes) for first hardware testing — both land
+> together so the exit criterion below can be checked once instead of
+> twice. Once hardware testing confirms this branch, it should be the one
+> merged into `idf6-baseline`/`main`, not the two source branches
+> separately.
+
 ## Goal
 
 A WireGuard library for ESP-IDF native (no Arduino), scoped to:
@@ -127,13 +136,55 @@ API, and blocking `tcpip_thread` on a network round-trip inside a
 `tcpip_api_call()` would risk starving the very packet processing the
 lookup depends on.
 
-### 3. Cryptokey routing direction (upstream bug, unverified in this fork)
+### 3. Cryptokey routing direction — CONFIRMED and FIXED
 
-A known fork of `wireguard-lwip` fixed a bug where cryptokey routing
-checked the destination IP instead of the source IP of incoming packets.
-Not yet confirmed whether this codebase (derived from the same upstream)
-has the same bug — needs auditing in `src/wireguardif.c` /
-`src/wireguard.c` as part of Phase 3 below.
+This codebase had the same bug as the `wireguard-lwip` fork mentioned
+above. In `wireguardif_process_data_message()` (`src/wireguardif.c`),
+after decrypting an inbound transport-data packet, the code copied
+`iphdr->dest` (the decrypted inner packet's *destination* address) into
+the variable it then checked against `peer->allowed_source_ips` —
+despite the code's own inline comment, carried over from upstream,
+literally saying "checks to see if the **source** IP address of the
+plaintext inner-packet routes correspondingly in the cryptokey routing
+table". Confirmed against lwIP's `struct ip_hdr` (`components/lwip` in
+esp-idf 6.0.2): `src` and `dest` are distinct, correctly-named fields;
+this was not a naming ambiguity, the wrong field was read.
+
+Effect: a connected peer could send decrypted packets claiming to
+originate from any source address, as long as the packet's
+*destination* fell inside that peer's own allowed-ips range, which
+defeats cryptokey routing as an ingress filter (its entire purpose per
+the WireGuard whitepaper). For a single-peer point-to-point tunnel with
+a narrow `allowed_ip`, the practical exposure is limited — there's only
+one peer to begin with — but it's still a straightforwardly wrong
+security check, worth fixing regardless of this fork's scope, and
+matters more if/when the library is used with more than one peer.
+
+Fixed: renamed the local variable from `dest`/`dest_ok` to
+`pkt_src`/`src_ok`, and changed `iphdr->dest` to `iphdr->src`. The IPv6
+branch was already a no-op TODO (`dest_ok = true` unconditionally, no
+filtering) — left as-is but the comment now says explicitly that IPv6
+ingress filtering is unimplemented, so it doesn't read as "same check,
+different code path" by a future reader.
+
+### 4. Handshake-initiation rate limit was inverted — CONFIRMED and FIXED
+
+Found during the same audit pass, not previously tracked as an issue.
+In `wireguard_process_initiation_message()` (`src/wireguard.c`), the
+per-peer rate limit on accepting handshake initiations was:
+
+    rate_limit = (peer->last_initiation_rx - now) < (1000 / MAX_INITIATIONS_PER_SECOND);
+
+Both operands are `uint32_t` millisecond timestamps, and in the normal
+case `now >= peer->last_initiation_rx` (time moves forward), so
+`last_initiation_rx - now` underflows and wraps to a value near
+`UINT32_MAX` — essentially never less than the threshold (500ms at the
+default `MAX_INITIATIONS_PER_SECOND=2`). The operands were reversed:
+it should be `now - peer->last_initiation_rx`. As written, the rate
+limit was silently a no-op in the normal case (every initiation that
+passed the timestamp-replay check was accepted, however frequent),
+except for one tick right at a ~49.7-day uint32 ms wraparound, where it
+would spuriously fire. Fixed by swapping the subtraction order.
 
 ## What's been done
 
@@ -240,12 +291,35 @@ connect/disconnect to exercise the race that issue #2 addresses.
       clean. **Not yet merged — needs hardware verification first.**
       Exit criterion (unchanged, still open): 100 connect/disconnect
       cycles on real hardware with no crash, no assert, no leak.
-- [ ] **Phase 3 — Core audit.** Cryptokey routing direction (issue #3),
-      packet-parsing bounds, replay window, constant-time comparisons,
-      key erasure, MAC1 verification, cookie replies, protocol timers,
-      TAI64N timestamp source/monotonicity across reboots. Host-side
-      tests: known ChaCha20-Poly1305 / X25519 / BLAKE2s test vectors,
-      fuzzing of the packet parser.
+- [~] **Phase 3 — Core audit.** Done so far, by manual review (not yet
+      hardware-tested, but all of it builds clean — see commit):
+      cryptokey routing direction (issue #3, confirmed + fixed),
+      handshake-initiation rate limit (found + fixed, see issue #4),
+      packet-parsing length bounds (`wireguard_get_message_type()`
+      validates every message type's exact or minimum length before
+      the caller casts the buffer — correct), constant-time comparison
+      (`crypto_equal()` in `src/crypto.c` is branch-free XOR-accumulate,
+      used correctly for MAC1/MAC2 verification — correct), key erasure
+      (`crypto_zero()` uses a `volatile` pointer so the compiler can't
+      optimize the wipe away; `keypair_destroy()` zeroes the whole
+      keypair struct — correct). Noted but not changed: the replay
+      window is 32 bits wide (`uint32_t replay_bitmap` in
+      `wireguard.h`), narrower than reference WireGuard implementations
+      typically use; this isn't a security hole (it can't let a replay
+      through), only a reliability one (packets reordered by more than
+      32 sequence numbers get spuriously dropped as "too old") — left
+      alone since fixing it means widening the bitmap type and isn't
+      cheap to verify without hardware to generate real reordering.
+      Still open: TAI64N timestamp source/monotonicity across reboots
+      (ties into the "no RTC, no synced time at boot" problem noted
+      elsewhere — needs a design decision, not just an audit), cookie
+      reply handling under load (untested — `wireguard_is_under_load()`
+      in `wireguard-platform.c` always returns `false`, so the
+      DoS-mitigation cookie path is never exercised; fine for a
+      single-peer point-to-point tunnel per the original scope, but
+      worth a comment saying so explicitly), and host-side test vectors
+      for ChaCha20-Poly1305 / X25519 / BLAKE2s (not started) and fuzzing
+      of the packet parser (not started).
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
       echo testing, 24h soak test across rekeys and WiFi drops,
       measurement-driven optimization only (no speculative tuning).
