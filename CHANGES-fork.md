@@ -442,8 +442,27 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
       convention) rather than hand-copied published constants — see
       `host-tests/README.md` for why. 34/34 checks pass, including
       tamper-rejection of the AEAD tag, and a clean run under
-      ASan+UBSan (`make asan`). Still open: fuzzing of the packet
-      parser (not started).
+      ASan+UBSan (`make asan`). Fuzzing of the packet parser: **done** —
+      see `host-tests/fuzz/` (libFuzzer, needs `clang`; `make run`).
+      Covers `wireguard_get_message_type()` and the three real
+      incoming-message parsers in `src/wireguard.c`
+      (`wireguard_process_initiation_message()`,
+      `wireguard_process_handshake_response()`,
+      `wireguard_process_cookie_message()`), overlaying fuzzer bytes onto
+      a validly-authenticated template of each message type so the
+      search gets past MAC1/AEAD checks instead of bouncing off them —
+      see `host-tests/fuzz/README.md` for the full rationale and for what
+      this does *not* cover (`wireguardif.c`'s lwIP/pbuf integration
+      layer, multi-packet stateful sequences). A 2-minute local smoke run
+      (ASan+UBSan) reached ~20,600 executions with no crashes; that's a
+      smoke-level result confirming the harness works end-to-end, not a
+      substitute for a longer run.
+
+  With this, every item originally listed under Phase 3 has either been
+  fixed or has a documented, deliberate reason it's out of scope for this
+  fork (replay-window width, cookie-reply-under-load). Phase 3 itself
+  isn't marked `[x]` yet below since none of it has been exercised on
+  real hardware — only by manual review, host-side tests, and fuzzing.
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
       echo testing, 24h soak test across rekeys and WiFi drops,
       measurement-driven optimization only (no speculative tuning).
