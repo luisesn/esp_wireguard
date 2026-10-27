@@ -425,12 +425,14 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
       TAI64N timestamp source/monotonicity across reboots: **fixed** —
       see issue #5 above (`esp_wireguard_connect()` now waits for the
       clock to sync, the user's chosen design, merged into
-      `hwtest-phase2-phase3`). Still open: cookie reply handling under
-      load (untested — `wireguard_is_under_load()`
+      `hwtest-phase2-phase3`). Cookie reply handling under load (now
+      explicitly documented, still untested — `wireguard_is_under_load()`
       in `wireguard-platform.c` always returns `false`, so the
-      DoS-mitigation cookie path is never exercised; fine for a
-      single-peer point-to-point tunnel per the original scope, but
-      worth a comment saying so explicitly). Host-side test vectors for
+      DoS-mitigation cookie path is never exercised; a comment at the
+      function now spells out why this is an acceptable trade-off for a
+      single-peer point-to-point tunnel per the original scope, and what
+      would need to change if this library is ever used in a
+      multi-peer/internet-facing responder role). Host-side test vectors for
       ChaCha20-Poly1305 / X25519 / BLAKE2s: **done** — see
       `host-tests/` (native `gcc` build, no ESP-IDF/hardware needed;
       `make check`). All three primitives cross-checked against
