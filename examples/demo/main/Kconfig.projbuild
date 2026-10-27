@@ -79,4 +79,68 @@ menu "Example Configuration"
         default "192.168.4.254"
         help
             Target IP address to send ICMP echo requests.
+
+    menu "TCP throughput test (Phase 4)"
+        config EXAMPLE_TCP_TEST_ENABLE
+            bool "Enable the TCP throughput test"
+            default n
+            help
+                Runs a simple TCP throughput test over the WireGuard tunnel
+                once the peer is up, for CHANGES-fork.md's Phase 4
+                (MTU/MSS tuning, throughput testing, 24h soak). This is
+                deliberately not iperf or anything protocol-specific: it
+                just moves bytes as fast as it can in one direction and
+                logs the measured rate, so the far end only needs a plain
+                TCP listener or sender, not a particular tool
+                (`nc`/netcat is enough on a Linux peer).
+
+        choice EXAMPLE_TCP_TEST_MODE
+            prompt "Direction to test"
+            depends on EXAMPLE_TCP_TEST_ENABLE
+            default EXAMPLE_TCP_TEST_MODE_RX
+            help
+                RX tests how fast this device can receive over the tunnel
+                (it listens; drive it from the peer with e.g.
+                `dd if=/dev/zero bs=65536 | nc <this-device-tunnel-ip> <port>`).
+                TX tests how fast it can send (it connects out and sends;
+                catch it on the peer with e.g.
+                `nc -l <port> | pv > /dev/null`, or plain
+                `nc -l <port> > /dev/null` without a rate, since the rate
+                this tool itself reports is measured at the sending end).
+            config EXAMPLE_TCP_TEST_MODE_RX
+                bool "Receive (this device listens, peer sends)"
+            config EXAMPLE_TCP_TEST_MODE_TX
+                bool "Transmit (this device connects out and sends)"
+        endchoice
+
+        config EXAMPLE_TCP_TEST_PORT
+            int "TCP port"
+            depends on EXAMPLE_TCP_TEST_ENABLE
+            default 5555
+
+        config EXAMPLE_TCP_TEST_PEER_ADDRESS
+            string "Peer's tunnel IP address (TX mode only)"
+            depends on EXAMPLE_TCP_TEST_ENABLE
+            default "10.252.1.1"
+            help
+                Where to connect to in TX mode. Not used in RX mode (this
+                device is the one listening, so it doesn't need to know
+                the peer's address up front -- whichever address actually
+                connects is logged when it does). Kept available
+                (not hidden) regardless of the chosen direction, purely so
+                the option always has a value to build with -- the RX
+                build path never reads it.
+
+        config EXAMPLE_TCP_TEST_DURATION_SEC
+            int "Test duration (seconds, 0 = run forever)"
+            depends on EXAMPLE_TCP_TEST_ENABLE
+            default 30
+            help
+                How long to run before closing the connection and
+                reporting a final rate. 0 keeps the connection open
+                indefinitely instead (useful for the 24h soak test, run
+                alongside the normal connect/disconnect cycling already in
+                this demo's app_main()) -- in that case only the periodic
+                rate logging applies, not a final summary.
+    endmenu
 endmenu
