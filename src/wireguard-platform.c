@@ -59,6 +59,23 @@ void wireguard_tai64n_now(uint8_t *output) {
 	U32TO8_BIG(output + 8, nanos);
 }
 
+/* Always "not under load": the cookie-reply DoS mitigation (RFC-style
+ * MAC2/cookie challenge in wireguard_process_initiation_message(), see
+ * src/wireguard.c) never engages. For this fork's scope -- a
+ * single-peer, point-to-point tunnel, not a multi-peer VPN gateway
+ * exposed to arbitrary initiators -- that's an acceptable trade-off: the
+ * only thing that could flood this endpoint with initiation attempts is
+ * whoever already has (or is guessing at) the one peer's keys, and the
+ * existing per-peer MAX_INITIATIONS_PER_SECOND rate limit (see issue #4
+ * in CHANGES-fork.md) already bounds how often a bad actor can make us
+ * do the expensive part (the Noise handshake crypto) regardless of
+ * whether a cookie challenge is also in play. If this library is ever
+ * used for a multi-peer or internet-facing responder role, this should
+ * return true once some real signal (CPU load, concurrent handshake
+ * count, a request-rate counter) exceeds a threshold, so the cookie path
+ * actually exercises. Untested as a result: this fork's hardware
+ * verification has never exercised wireguard_handle_cookie_reply() /
+ * the cookie half of wireguard_process_initiation_message(). */
 bool wireguard_is_under_load() {
 	return false;
 }
