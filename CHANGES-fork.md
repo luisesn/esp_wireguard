@@ -466,28 +466,37 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
       echo testing, 24h soak test across rekeys and WiFi drops,
       measurement-driven optimization only (no speculative tuning).
-      Started: the WireGuard interface MTU (`WIREGUARDIF_MTU`, previously
-      hardcoded to 1420) is now `CONFIG_WIREGUARD_MTU`, still defaulting
-      to 1420 — this is groundwork (a knob to turn), not a tuning result;
-      see Kconfig's help text for how to actually pick a value from a
-      measurement of the real path, rather than guessing. Still open,
-      and blocked on real hardware + a real network path rather than
-      something that can be done from this environment alone:
-      MTU/MSS measurement against the actual deployment (home connection
-      vs. cellular, etc.), throughput testing (`iperf`/HTTP/TCP echo —
-      no test tooling exists in `examples/demo` yet; needs a decision on
-      approach, e.g. the esp-idf `iperf` managed component vs. a small
-      custom TCP echo client/server, before building one out), and the
-      24h soak test itself.
+      Groundwork done: the WireGuard interface MTU (`WIREGUARDIF_MTU`,
+      previously hardcoded to 1420) is now `CONFIG_WIREGUARD_MTU`, still
+      defaulting to 1420 -- a knob to turn, not a tuning result; see
+      Kconfig's help text for how to actually pick a value from a
+      measurement of the real path, rather than guessing. A TCP
+      throughput test tool is also now in `examples/demo` (see the test
+      plan below) for the throughput/soak testing this phase needs.
+      Still open, and blocked on real hardware + a real network path
+      rather than something that can be done from this environment
+      alone: MTU/MSS measurement against the actual deployment (home
+      connection vs. cellular, etc.), running the throughput test for
+      real, and the 24h soak test itself.
 
-  Test plan (decided): the ESP32 has no shell, so some test tooling has
-  to run in `examples/demo` regardless of what's on the hub -- the user
-  has full control of the Linux hub and can install whatever's needed
-  there. Chosen approach: esp-idf's own `iperf` managed component on the
-  ESP32 side (speaks the classic iperf2 wire protocol), paired with
-  `iperf2` (the classic `iperf` package, *not* `iperf3` -- the two are
-  not wire-compatible) on the hub. Not yet implemented in
-  `examples/demo`.
+  Test plan: the ESP32 has no shell, so some test tooling has to run in
+  `examples/demo` regardless of what's on the hub. Originally planned to
+  use esp-idf's `iperf` managed component on the ESP32 side (classic
+  iperf2 protocol) paired with `iperf2` on the hub, but the component
+  registry (`components-file.espressif.com`) isn't reachable from this
+  sandbox's network, so that choice couldn't be build-verified here and
+  was dropped in favor of something this environment can actually
+  compile and check end-to-end: a small custom TCP byte-pump, **done**
+  -- see `examples/demo/main/tcp_throughput_test.{c,h}` and the new
+  "TCP throughput test (Phase 4)" Kconfig menu (off by default:
+  `CONFIG_EXAMPLE_TCP_TEST_ENABLE`). It just moves bytes as fast as it
+  can in one configured direction (RX: this device listens; TX: it
+  connects out and sends) and logs the measured rate, so the hub only
+  needs a plain TCP listener/sender (`nc` is enough) rather than a tool
+  whose wire protocol has to match. A duration of 0 keeps it running
+  (and reconnecting across drops) indefinitely, for the soak test below.
+  Build-verified in all three configurations (disabled, RX, TX); not yet
+  run against real hardware.
 
   1. **Path MTU check.** From the hub, `ping -M do -s <size>
      <esp32-tunnel-ip>` (over the tunnel), sweeping `<size>` down from
@@ -496,14 +505,17 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
      already need lowering for this specific network path (home
      WiFi/broadband, not cellular, so likely fine, but worth confirming
      rather than assuming).
-  2. **Throughput.** `iperf -s` (iperf2) on the hub; the ESP32 runs the
-     `iperf` component as a client against it (and, separately, as a
-     server with the hub as client, to test both directions).
-  3. **24h soak.** A long-lived TCP connection (or periodic iperf runs)
-     held across at least one WireGuard rekey (`REKEY_AFTER_TIME` =
-     120s, so trivial to hit) and at least one real WiFi drop/reconnect,
-     watching for the connection surviving, stalling, or needing an
-     application-level reconnect.
+  2. **Throughput.** RX mode on the ESP32 with e.g.
+     `dd if=/dev/zero bs=65536 | nc <esp32-tunnel-ip> <port>` from the
+     hub, and separately TX mode on the ESP32 with
+     `nc -l <port> > /dev/null` (or `| pv > /dev/null` for a live rate)
+     on the hub, to measure both directions.
+  3. **24h soak.** The same test in either mode, with duration set to 0,
+     left running across at least one WireGuard rekey (`REKEY_AFTER_TIME`
+     = 120s, so trivial to hit) and at least one real WiFi drop/reconnect
+     -- this demo's `app_main()` already cycles disconnect/connect every
+     20s on its own, which doubles as part of this -- watching for the
+     TCP connection surviving, stalling, or needing a device reset.
 - [ ] **Phase 5 — Public API.** `esp_event` events (handshake done, peer
       down, session expired) instead of polling; auto-reconnect on IP
       recovery; endpoint re-resolution on reconnect (currently only
