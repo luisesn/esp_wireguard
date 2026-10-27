@@ -24,6 +24,7 @@
 
 #include <esp_wireguard.h>
 #include "sync_time.h"
+#include "tcp_throughput_test.h"
 
 #define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
 #define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
@@ -309,6 +310,7 @@ void app_main(void)
         }
     }
     start_ping();
+    tcp_throughput_test_start();
 
     while (1) {
         vTaskDelay(1000 * 10 / portTICK_PERIOD_MS);
