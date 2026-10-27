@@ -106,10 +106,21 @@ esp_err_t esp_wireguard_init(wireguard_config_t *config, wireguard_ctx_t *ctx);
  *
  * Do not call this function multiple times.
  *
+ * Before doing anything else, this waits for the platform clock to become
+ * plausible (see `wireguard_platform_time_is_synced()`), for up to
+ * `CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS`. The ESP32 has no RTC, so
+ * sending a handshake before the clock is set (normally by SNTP, which
+ * this function does not start itself) risks it being silently rejected
+ * by the peer as a replay. This wait also applies on a reconnect, not
+ * just the first connect.
+ *
  * @param       ctx Context of WireGuard.
  * @return
  *      - ESP_OK on success.
- *      - ESP_FAIL on failure.
+ *      - ESP_ERR_TIMEOUT: the clock did not become plausible within
+ *        `CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS`. Safe to retry once the
+ *        clock is expected to be set.
+ *      - ESP_FAIL on other failure.
  */
 esp_err_t esp_wireguard_connect(wireguard_ctx_t *ctx);
 
