@@ -186,7 +186,7 @@ passed the timestamp-replay check was accepted, however frequent),
 except for one tick right at a ~49.7-day uint32 ms wraparound, where it
 would spuriously fire. Fixed by swapping the subtraction order.
 
-### 5. TAI64N timestamp has no persistence across reboots — design decision needed, not yet fixed
+### 5. TAI64N timestamp has no persistence across reboots — FIXED (wait for clock sync)
 
 `wireguard_tai64n_now()` (`src/wireguard-platform.c`) builds the
 handshake-initiation timestamp from `gettimeofday()`, i.e. the libc wall
@@ -244,14 +244,37 @@ Candidate fixes, roughly in order of effort:
    level instead of software, but is a hardware BOM change, not something
    this library can do on its own, and is overkill if (2) is acceptable.
 
-Leaning towards (2) as the one worth implementing, with (1) as a cheap
-complementary safety net regardless (surfacing the failure clearly is
-good practice even once (2) exists, for the case where NVS itself is
-freshly erased). Not implemented yet — flagging here for a decision
-before touching `wireguard-platform.c`, since it adds a dependency
-(`nvs_flash`) this component doesn't currently have, and changing it
-while hardware testing is in progress on the exact connect/disconnect
-path this touches would make that test's results harder to attribute.
+**Fixed, on branch `phase3-wait-for-time-sync` (off `idf6-baseline`,
+merged into `hwtest-phase2-phase3`), by the user's explicit choice: a
+stricter variant of option 1 above — block until the clock is actually
+synced, rather than just log a warning and proceed.**
+
+Rather than (2) (persisting a high-water-mark in NVS), which was my own
+recommendation above, the user chose the simpler option: make
+`esp_wireguard_connect()` wait for SNTP (or whatever sets the clock) to
+finish before doing anything else. This is less work (no new `nvs_flash`
+dependency) and fixes the actual precondition — an unset clock — rather
+than working around it with a persisted floor.
+
+Implementation:
+
+- `wireguard_platform_time_is_synced()` (new, in `wireguard-platform.c`/`.h`)
+  — a coarse sanity check: `time(NULL)` is past a hardcoded floor
+  (`2024-01-01T00:00:00Z`). Not a freshness or correctness check, just
+  rules out "obviously never set".
+- `esp_wireguard_connect()` now polls this function right after its
+  initial `!ctx` check — before any `netif`/`wireguardif` setup — and
+  blocks in `CONFIG_WIREGUARD_TIME_SYNC_POLL_INTERVAL_MS` (default
+  500 ms) steps for up to `CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS`
+  (default 30 s) before giving up with `ESP_ERR_TIMEOUT`. This runs on
+  every call, not just the first connect, since a reconnect after a
+  reboot hits the same unset-clock window.
+- The library still does not start SNTP itself; the application remains
+  responsible for that (see `examples/demo/main/sync_time.c`).
+
+Does not change the responder-side gap for the reverse direction (remote
+end initiating to the ESP32) noted above, since that's not this fork's
+normal use case; the same fix would apply there too if it's ever needed.
 
 ## What's been done
 
@@ -399,10 +422,11 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
       32 sequence numbers get spuriously dropped as "too old") — left
       alone since fixing it means widening the bitmap type and isn't
       cheap to verify without hardware to generate real reordering.
-      Still open: TAI64N timestamp source/monotonicity across reboots
-      (issue #5 above — root-caused, candidate fixes written up, waiting
-      on a decision before touching `wireguard-platform.c`), cookie
-      reply handling under load (untested — `wireguard_is_under_load()`
+      TAI64N timestamp source/monotonicity across reboots: **fixed** —
+      see issue #5 above (`esp_wireguard_connect()` now waits for the
+      clock to sync, the user's chosen design, merged into
+      `hwtest-phase2-phase3`). Still open: cookie reply handling under
+      load (untested — `wireguard_is_under_load()`
       in `wireguard-platform.c` always returns `false`, so the
       DoS-mitigation cookie path is never exercised; fine for a
       single-peer point-to-point tunnel per the original scope, but
