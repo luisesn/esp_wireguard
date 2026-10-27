@@ -42,8 +42,10 @@ extern "C" {
 #include "lwip/netif.h"
 #include "lwip/ip_addr.h"
 
-// Default MTU for WireGuard is 1420 bytes
-#define WIREGUARDIF_MTU (1420)
+// MTU of the WireGuard interface. Configurable via Kconfig
+// (CONFIG_WIREGUARD_MTU, see Kconfig for the reasoning) since the right
+// value depends on the actual network path, not on this library.
+#define WIREGUARDIF_MTU (CONFIG_WIREGUARD_MTU)
 
 #define WIREGUARDIF_DEFAULT_PORT		(51820)
 

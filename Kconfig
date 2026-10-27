@@ -22,6 +22,40 @@ config MAX_INITIATIONS_PER_SECOND
     default 2
     help
         Per device limit on accepting (valid) initiation requests - per peer.
+
+config WIREGUARD_MTU
+    int "MTU of the WireGuard interface"
+    default 1420
+    help
+        1420 is the same default used by wg-quick and most WireGuard
+        implementations: it fits a full-size (1500-byte MTU) WireGuard
+        UDP packet (60 bytes of IPv4 + UDP + WireGuard transport-data
+        overhead) without IP fragmentation, with a little headroom left
+        for paths with extra encapsulation (PPPoE, some VPN-over-VPN or
+        tunneled setups) that would otherwise need a lower MTU to avoid
+        fragmenting the *outer* UDP packet.
+
+        Lower this if the path between this device and its peer has a
+        smaller MTU than a typical Ethernet link -- the most common
+        real-world case being a cellular (LTE/5G) data connection, which
+        can be as low as ~1380-1400 bytes end-to-end once the carrier's
+        own encapsulation is accounted for. There is no single correct
+        value for every network; this should be set from a measurement
+        of the actual path (e.g. `ping -M do -s <size> <peer>` from the
+        remote end to find the largest non-fragmenting packet, or by
+        checking for retransmits/stalls under load with the MTU at its
+        default), not changed speculatively. See CHANGES-fork.md, Phase
+        4, for this fork's own measurement notes once hardware testing
+        of this is done.
+
+        Changing this does not change the WireGuard protocol framing
+        overhead this value accounts for (60 bytes, fixed by the
+        protocol) -- it only changes what's reported to lwIP as the
+        tunnel interface's MTU, which TCP's MSS is derived from, so
+        setting it too high for the real path risks fragmentation (or,
+        if an intermediate hop drops fragments as cellular/CGNAT paths
+        sometimes do, delivery failures that are hard to diagnose) and
+        setting it too low under-uses the available path MTU.
 choice WIREGUARD_x25519_IMPLEMENTATION
     prompt "x25519 implementation to use"
     default WIREGUARD_x25519_IMPLEMENTATION_DEFAULT
