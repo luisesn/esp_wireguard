@@ -30,6 +30,7 @@
  */
 
 #include <assert.h>
+#include <stdbool.h>
 #include <string.h>
 #include <inttypes.h>
 #include <freertos/FreeRTOS.h>
@@ -39,12 +40,16 @@
 #include <lwip/err.h>
 #include <lwip/priv/tcpip_priv.h>
 #include <esp_err.h>
+#include <esp_event.h>
 #include <esp_log.h>
+#include <esp_netif.h>
 #include <esp_wireguard.h>
 #include <mbedtls/base64.h>
 
 #include "wireguard-platform.h"
 #include "wireguardif.h"
+
+ESP_EVENT_DEFINE_BASE(WIREGUARD_EVENT);
 
 #define TAG "esp_wireguard"
 #define WG_KEY_LEN  (32)
@@ -309,6 +314,23 @@ static err_t esp_wireguard_connect_tcpip(struct tcpip_api_call_data *call)
     return args->lwip_err;
 }
 
+struct wg_update_endpoint_call {
+    struct tcpip_api_call_data call;
+    struct netif *netif;
+    const ip_addr_t *ip;
+    uint16_t port;
+    err_t lwip_err;
+};
+
+/* Runs on tcpip_thread. See "tcpip_thread marshaling" above. */
+static err_t esp_wireguard_update_endpoint_tcpip(struct tcpip_api_call_data *call)
+{
+    struct wg_update_endpoint_call *args = (struct wg_update_endpoint_call *)call;
+
+    args->lwip_err = wireguardif_update_endpoint(args->netif, wireguard_peer_index, args->ip, args->port);
+    return args->lwip_err;
+}
+
 esp_err_t esp_wireguard_connect(wireguard_ctx_t *ctx)
 {
     esp_err_t err = ESP_FAIL;
@@ -377,6 +399,29 @@ esp_err_t esp_wireguard_connect(wireguard_ctx_t *ctx)
         }
         ctx->netif = wg_netif;
         ctx->netif_default = netif_default;
+    } else {
+        /* Reconnecting on an already-created interface: re-resolve the
+         * peer's endpoint instead of reusing whatever address the very
+         * first connect happened to resolve. esp_wireguard_peer_init()
+         * re-does the (idempotent) key setup too, but the only thing that
+         * can actually have changed is the resolved endpoint_ip/port, so
+         * that's the only piece applied below. See CHANGES-fork.md, Phase
+         * 5, "endpoint re-resolution on reconnect". */
+        esp_err_t resolve_err = esp_wireguard_peer_init(ctx->config, &peer);
+
+        if (resolve_err != ESP_OK) {
+            ESP_LOGW(TAG, "esp_wireguard_peer_init (re-resolve on reconnect): %s, keeping previous endpoint", esp_err_to_name(resolve_err));
+        } else {
+            struct wg_update_endpoint_call update_args = {0};
+
+            update_args.netif = ctx->netif;
+            update_args.ip = &peer.endpoint_ip;
+            update_args.port = peer.endport_port;
+            tcpip_api_call(esp_wireguard_update_endpoint_tcpip, &update_args.call);
+            if (update_args.lwip_err != ERR_OK) {
+                ESP_LOGW(TAG, "wireguardif_update_endpoint: %i, keeping previous endpoint", update_args.lwip_err);
+            }
+        }
     }
 
     {
@@ -521,4 +566,134 @@ esp_err_t esp_wireguardif_peer_is_up(wireguard_ctx_t *ctx)
     err = ESP_OK;
 fail:
     return err;
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Monitor task (Phase 5: events instead of polling, auto-reconnect)
+ * ---------------------------------------------------------------------
+ *
+ * See esp_wireguard_start_monitor()'s doc comment in esp_wireguard.h for
+ * what this does and why. Only one monitor is supported at a time, same
+ * as the rest of this component's single-peer design (wireguard_peer_index
+ * and friends are static singletons too).
+ */
+
+static TaskHandle_t monitor_task_handle = NULL;
+static esp_event_handler_instance_t monitor_ip_event_instance = NULL;
+
+/* Registered for IP_EVENT, any event ID. Only IP_EVENT_STA_GOT_IP and
+ * IP_EVENT_ETH_GOT_IP (whichever this build has) mean anything here; any
+ * other IP_EVENT id (e.g. IP_EVENT_STA_LOST_IP) is ignored. Runs on the
+ * default event loop task, not tcpip_thread -- it only wakes the monitor
+ * task via a notification, it does not touch netif/wireguardif state
+ * itself, so no marshaling is needed here. */
+static void wg_monitor_ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+
+    if (event_base != IP_EVENT) {
+        return;
+    }
+    if (event_id != IP_EVENT_STA_GOT_IP
+#if defined(IP_EVENT_ETH_GOT_IP)
+            && event_id != IP_EVENT_ETH_GOT_IP
+#endif
+       ) {
+        return;
+    }
+    if (monitor_task_handle != NULL) {
+        xTaskNotifyGive(monitor_task_handle);
+    }
+}
+
+static void wg_monitor_task(void *arg)
+{
+    wireguard_ctx_t *ctx = (wireguard_ctx_t *)arg;
+    bool was_up = false;
+
+    for (;;) {
+        /* Block for one poll interval, but wake early (ulTaskNotifyTake
+         * returning non-zero) if the IP-event handler above notified us.
+         * Either way, re-check peer_is_up() right after. */
+        uint32_t ip_recovered = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CONFIG_WIREGUARD_MONITOR_POLL_INTERVAL_MS));
+        bool is_up = (esp_wireguardif_peer_is_up(ctx) == ESP_OK);
+
+        if (is_up && !was_up) {
+            ESP_LOGI(TAG, "wg_monitor: peer up");
+            esp_event_post(WIREGUARD_EVENT, WIREGUARD_EVENT_PEER_UP, NULL, 0, 0);
+        } else if (!is_up && was_up) {
+            ESP_LOGI(TAG, "wg_monitor: peer down");
+            esp_event_post(WIREGUARD_EVENT, WIREGUARD_EVENT_PEER_DOWN, NULL, 0, 0);
+        }
+        was_up = is_up;
+
+        if (ip_recovered && !is_up && ctx->netif != NULL) {
+            /* The underlying network interface just got an IP again while
+             * the peer was down: most likely WiFi dropped and reconnected.
+             * esp_wireguard_connect() re-resolves the endpoint and is safe
+             * to call again on an already-created interface. */
+            esp_err_t err;
+
+            ESP_LOGI(TAG, "wg_monitor: IP recovered while peer is down, attempting reconnect");
+            err = esp_wireguard_connect(ctx);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "wg_monitor: reconnect attempt failed: %s", esp_err_to_name(err));
+            }
+        }
+    }
+}
+
+esp_err_t esp_wireguard_start_monitor(wireguard_ctx_t *ctx)
+{
+    esp_err_t err;
+
+    if (!ctx) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (monitor_task_handle != NULL) {
+        ESP_LOGW(TAG, "esp_wireguard_start_monitor: a monitor is already running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Registering for IP_EVENT with ESP_EVENT_ANY_ID requires a default
+     * event loop to already exist (examples/demo creates one for its own
+     * WiFi event handling via esp_event_loop_create_default()). If none
+     * exists yet, this fails with ESP_ERR_INVALID_STATE, which we just
+     * pass up rather than creating one ourselves -- owning the default
+     * event loop's lifetime is the application's job, not this
+     * component's. */
+    err = esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID,
+            &wg_monitor_ip_event_handler, NULL, &monitor_ip_event_instance);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wireguard_start_monitor: esp_event_handler_instance_register: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (xTaskCreate(wg_monitor_task, "wg_monitor", 4096, ctx, tskIDLE_PRIORITY + 1, &monitor_task_handle) != pdPASS) {
+        ESP_LOGE(TAG, "esp_wireguard_start_monitor: xTaskCreate failed");
+        esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, monitor_ip_event_instance);
+        monitor_ip_event_instance = NULL;
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t esp_wireguard_stop_monitor(void)
+{
+    if (monitor_task_handle == NULL) {
+        return ESP_OK;
+    }
+
+    vTaskDelete(monitor_task_handle);
+    monitor_task_handle = NULL;
+
+    if (monitor_ip_event_instance != NULL) {
+        esp_event_handler_instance_unregister(IP_EVENT, ESP_EVENT_ANY_ID, monitor_ip_event_instance);
+        monitor_ip_event_instance = NULL;
+    }
+
+    return ESP_OK;
 }
