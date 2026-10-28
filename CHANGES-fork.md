@@ -576,11 +576,37 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
         from Phase 6's planned build matrix could not be verified here --
         this sandbox only has the xtensa (esp32) toolchain installed, not
         the RISC-V one the other three targets need.
-- [ ] **Phase 6 — Tests and CI.** Rewrite `.github/workflows/build.yml`
-      for `esp-idf 6.0.x` only, across `esp32`/`esp32s2`/`esp32s3`/
-      `esp32c3`; host-side unit tests in CI; hardware-in-the-loop tests
-      against a real peer (needs a self-hosted runner — not available
-      yet).
+- [x] **Phase 6 — Tests and CI.** Done except hardware-in-the-loop
+      (`phase6-ci-rewrite`, merged into `hwtest-phase2-phase3`):
+      - `.github/workflows/build.yml` rewritten from scratch. The old
+        matrix (esp-idf 4.0.x-4.4.x, `master`, and ESP8266 RTOS SDK, each
+        with its own manual toolchain install/cache steps) is gone; this
+        fork doesn't support any of those. The new `idf-build` job builds
+        `examples/demo` for `esp32`/`esp32s2`/`esp32s3`/`esp32c3` using
+        Espressif's official `espressif/idf:v6.0.2` Docker image (matching
+        this fork's exact target esp-idf version), which needs no manual
+        toolchain setup at all.
+      - A new `host-tests` job runs the host-side crypto known-answer
+        tests (`host-tests/Makefile`'s `check` and `asan` targets) and a
+        bounded (120s) smoke run of the Phase 3 libFuzzer packet-parser
+        harness (`host-tests/fuzz/`), uploading the corpus/any crash
+        artifacts on every run.
+      - Hardware-in-the-loop tests against a real peer are **not**
+        implemented: they need a self-hosted runner with real ESP32
+        hardware attached and a reachable peer, which doesn't exist yet.
+        Left as a comment in the workflow pointing at where that job would
+        go, not as a stub job.
+      - **Caveat**: this cloud sandbox has no Docker and no network access
+        to Docker Hub or GitHub's own hosted runners, so the `idf-build`
+        job itself (and the workflow as a whole, as a GitHub Actions
+        workflow) could not actually be executed before being committed
+        -- only reviewed, and cross-checked against the local esp-idf
+        6.0.2 build this session already verified directly (Phase 5). The
+        `host-tests` job's commands (`make check`, `make asan`, the fuzz
+        `fuzz`/`run` targets) *were* run locally here and pass clean (5018
+        fuzzer executions in the 30s test run, no crashes). Treat the
+        first real run of this workflow on GitHub as the actual
+        verification of the `idf-build` job and the Docker image pin.
 - [ ] **Phase 7 — Publish.** Minimal point-to-point TCP client example,
       changelog, semver, component registry listing.
 
