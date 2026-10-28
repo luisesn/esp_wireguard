@@ -137,6 +137,27 @@ config WIREGUARD_MTU
         if an intermediate hop drops fragments as cellular/CGNAT paths
         sometimes do, delivery failures that are hard to diagnose) and
         setting it too low under-uses the available path MTU.
+config WIREGUARD_MONITOR_POLL_INTERVAL_MS
+    int "Monitor task poll interval (ms)"
+    default 1000
+    help
+        How often the background task started by esp_wireguard_start_monitor()
+        (Phase 5) calls esp_wireguardif_peer_is_up() to detect up/down
+        transitions and post WIREGUARD_EVENT_PEER_UP / _PEER_DOWN
+        accordingly. The underlying wireguardif/wireguard.c library has no
+        up/down callback of its own, so this is still polling under the
+        hood -- what changes is who does the polling: the component now
+        does it once, internally, so the application can subscribe to
+        events instead of running its own poll loop.
+
+        Lower values detect a dropped peer sooner, at the cost of waking
+        the CPU (and, on a WiFi power-save device, the radio) more often.
+        The WireGuard protocol's own keepalive/handshake-retry timers
+        already operate on the order of several seconds to tens of
+        seconds, so values much below 500ms rarely detect a real
+        transition any sooner in practice -- they just poll more often in
+        between.
+
 choice WIREGUARD_x25519_IMPLEMENTATION
     prompt "x25519 implementation to use"
     default WIREGUARD_x25519_IMPLEMENTATION_DEFAULT

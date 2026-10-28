@@ -37,7 +37,35 @@ extern "C" {
 
 #include <stdint.h>
 #include <esp_err.h>
+#include <esp_event.h>
 #include <lwip/netif.h>
+
+/**
+ * @brief Event base for WireGuard peer up/down transitions.
+ *
+ * Subscribe with esp_event_handler_register(WIREGUARD_EVENT, ...) after
+ * calling esp_wireguard_start_monitor(). See wireguard_event_id_t for the
+ * events posted on this base. event_data is always NULL for these events;
+ * there is currently only one peer, so there is nothing to disambiguate.
+ */
+ESP_EVENT_DECLARE_BASE(WIREGUARD_EVENT);
+
+typedef enum {
+    /** The peer transitioned from down (or never connected) to up: it has
+     *  a valid session key and can exchange data. This is the "handshake
+     *  done" event -- it fires for the initial handshake and for every
+     *  rekey that completes after a prior WIREGUARD_EVENT_PEER_DOWN. */
+    WIREGUARD_EVENT_PEER_UP = 0,
+    /** The peer transitioned from up to down: its session key has expired
+     *  (WireGuard sessions are rekeyed periodically; this fires if a rekey
+     *  does not complete in time) or esp_wireguard_disconnect() was called.
+     *  The underlying wireguardif/wireguard.c library does not currently
+     *  report *why* a peer went down, so this single event covers both a
+     *  normal planned disconnect and an unexpected session expiry; if your
+     *  application needs to tell them apart, track whether you called
+     *  esp_wireguard_disconnect() yourself. */
+    WIREGUARD_EVENT_PEER_DOWN,
+} wireguard_event_id_t;
 
 #define ESP_WIREGUARD_CONFIG_DEFAULT() { \
     .private_key = NULL, \
@@ -136,6 +164,68 @@ esp_err_t esp_wireguard_set_default(wireguard_ctx_t *ctx);
  * @brief Test if the peer is up.
  */
 esp_err_t esp_wireguardif_peer_is_up(wireguard_ctx_t *ctx);
+
+/**
+ * @brief Start a background task that watches the peer and posts
+ *        WIREGUARD_EVENT events instead of making the application poll.
+ *
+ * This does not change how the peer's up/down state is actually
+ * determined: the wireguardif/wireguard.c library has no up/down callback
+ * of its own, so this task still calls esp_wireguardif_peer_is_up() in a
+ * loop internally, every CONFIG_WIREGUARD_MONITOR_POLL_INTERVAL_MS. What
+ * changes is who does the polling -- the component now does it once, here,
+ * so the application can subscribe to WIREGUARD_EVENT_PEER_UP /
+ * WIREGUARD_EVENT_PEER_DOWN instead of running its own poll loop.
+ *
+ * This also drives two more Phase 5 behaviors:
+ *  - Auto-reconnect on IP recovery: it additionally listens for
+ *    IP_EVENT_STA_GOT_IP / IP_EVENT_ETH_GOT_IP (whichever is compiled in)
+ *    on the default event loop, and if the peer is currently down when one
+ *    of those fires, it calls esp_wireguard_connect(ctx) again. This
+ *    requires a default event loop to already exist
+ *    (esp_event_loop_create_default(), as examples/demo already does for
+ *    its own WiFi handling) and, naturally, an underlying network
+ *    interface that actually posts those events (a WiFi station or
+ *    Ethernet netif -- not the WireGuard pseudo-netif itself, which does
+ *    not post IP events; see Kconfig's
+ *    WIREGUARD_WORKAROUND_ESP_NETIF_TYPE_CONFUSION comment).
+ *  - Endpoint re-resolution on reconnect: esp_wireguard_connect() itself
+ *    (not just this monitor) now re-resolves the peer's endpoint hostname
+ *    every time it is called on an already-created interface, not only on
+ *    the very first connect. This matters whenever the peer's address can
+ *    change under a stable hostname (dynamic DNS, an ISP that renumbers
+ *    the peer's IP, round-robin DNS) -- previously a reconnect always
+ *    reused whatever address the very first connect happened to resolve.
+ *
+ * A WireGuard tunnel's own keepalive and handshake-retry timers assume
+ * timely packet delivery. ESP-IDF's default WiFi modem-sleep (power save)
+ * can delay inbound UDP packets by tens to hundreds of milliseconds while
+ * the radio is asleep, which can show up as a spuriously slow handshake or
+ * a peer that looks like it flaps between up and down under this monitor's
+ * polling. If you see that, try esp_wifi_set_ps(WIFI_PS_NONE) (at the cost
+ * of higher power draw) before assuming there is a tunnel problem.
+ *
+ * Only one monitor (and one ctx) is supported at a time, matching the rest
+ * of this component's single-peer, single-interface design.
+ *
+ * @param ctx Context of WireGuard. Must stay valid (and must not be a
+ *            stack variable that goes out of scope) for as long as the
+ *            monitor is running, since the task keeps a pointer to it.
+ * @return
+ *      - ESP_OK on success.
+ *      - ESP_ERR_INVALID_ARG: ctx is NULL.
+ *      - ESP_ERR_INVALID_STATE: a monitor is already running.
+ *      - ESP_FAIL: the background task or event handler could not be
+ *        created.
+ */
+esp_err_t esp_wireguard_start_monitor(wireguard_ctx_t *ctx);
+
+/**
+ * @brief Stop the background task started by esp_wireguard_start_monitor().
+ *
+ * Safe to call even if no monitor is running (returns ESP_OK).
+ */
+esp_err_t esp_wireguard_stop_monitor(void);
 
 /**
  * @brief Disconnect from the peer

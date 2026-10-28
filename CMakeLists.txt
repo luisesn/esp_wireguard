@@ -18,7 +18,7 @@ idf_component_register(
          "src/nacl/crypto_scalarmult/curve25519/ref/smult.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "src"
-    REQUIRES esp_netif lwip mbedtls)
+    REQUIRES esp_netif esp_event lwip mbedtls)
 
 # Known false positive from GCC's -Wstringop-overread against this file's
 # pointer arithmetic; kept as a targeted suppression rather than a blanket

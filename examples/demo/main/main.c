@@ -45,6 +45,32 @@ static const char *TAG = "demo";
 static int s_retry_num = 0;
 static wireguard_config_t wg_config = ESP_WIREGUARD_CONFIG_DEFAULT();
 
+/* Set/cleared by wg_event_handler() below in response to WIREGUARD_EVENT,
+ * instead of app_main() polling esp_wireguardif_peer_is_up() itself. See
+ * CHANGES-fork.md, Phase 5. */
+static EventGroupHandle_t s_wg_event_group;
+#define WG_PEER_UP_BIT BIT0
+
+static void wg_event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data)
+{
+    if (event_base != WIREGUARD_EVENT) {
+        return;
+    }
+    switch (event_id) {
+        case WIREGUARD_EVENT_PEER_UP:
+            ESP_LOGI(TAG, "WIREGUARD_EVENT_PEER_UP");
+            xEventGroupSetBits(s_wg_event_group, WG_PEER_UP_BIT);
+            break;
+        case WIREGUARD_EVENT_PEER_DOWN:
+            ESP_LOGI(TAG, "WIREGUARD_EVENT_PEER_DOWN");
+            xEventGroupClearBits(s_wg_event_group, WG_PEER_UP_BIT);
+            break;
+        default:
+            break;
+    }
+}
+
 static esp_err_t wireguard_setup(wireguard_ctx_t* ctx)
 {
     esp_err_t err = ESP_FAIL;
@@ -299,16 +325,29 @@ void app_main(void)
         goto fail;
     }
 
-    while (1) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        err = esp_wireguardif_peer_is_up(&ctx);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Peer is up");
-            break;
-        } else {
-            ESP_LOGI(TAG, "Peer is down");
-        }
+    /* Phase 5: events instead of polling, plus auto-reconnect on IP
+     * recovery and endpoint re-resolution (both handled inside
+     * esp_wireguard_connect()/the monitor task itself -- nothing extra to
+     * do here for those two). See esp_wireguard_start_monitor()'s doc
+     * comment in esp_wireguard.h. */
+    s_wg_event_group = xEventGroupCreate();
+    {
+        esp_event_handler_instance_t instance_wg_event;
+
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIREGUARD_EVENT,
+                                                            ESP_EVENT_ANY_ID,
+                                                            &wg_event_handler,
+                                                            NULL,
+                                                            &instance_wg_event));
     }
+    err = esp_wireguard_start_monitor(&ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wireguard_start_monitor: %s", esp_err_to_name(err));
+        goto fail;
+    }
+
+    xEventGroupWaitBits(s_wg_event_group, WG_PEER_UP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    ESP_LOGI(TAG, "Peer is up");
     start_ping();
     tcp_throughput_test_start();
 
@@ -325,9 +364,7 @@ void app_main(void)
             ESP_LOGE(TAG, "esp_wireguard_connect: %s", esp_err_to_name(err));
             goto fail;
         }
-        while (esp_wireguardif_peer_is_up(&ctx) != ESP_OK) {
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
+        xEventGroupWaitBits(s_wg_event_group, WG_PEER_UP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
         ESP_LOGI(TAG, "Peer is up");
         esp_wireguard_set_default(&ctx);
     }
