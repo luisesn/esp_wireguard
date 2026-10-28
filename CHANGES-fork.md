@@ -607,8 +607,34 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
         fuzzer executions in the 30s test run, no crashes). Treat the
         first real run of this workflow on GitHub as the actual
         verification of the `idf-build` job and the Docker image pin.
-- [ ] **Phase 7 — Publish.** Minimal point-to-point TCP client example,
-      changelog, semver, component registry listing.
+- [x] **Phase 7 — Publish.** Done, except the actual act of publishing
+      (`phase7-publish`, merged into `hwtest-phase2-phase3`):
+      - `examples/tcp_client` added: a minimal point-to-point TCP client,
+        smaller than `examples/demo` (just WiFi + SNTP + one tunnel + the
+        Phase 5 events API + a loop that opens a plain TCP connection to
+        the peer's tunnel IP). Build-verified, esp32, full clean build;
+        not yet run against real hardware.
+      - `CHANGELOG.md` added, summarizing this fork's changes
+        chronologically, with a "Versioning" section explaining why this
+        is still pre-1.0.0.
+      - `idf_component.yml` got `repository`/`documentation`/`issues`/
+        `tags` metadata for the component registry listing.
+        `.github/workflows/publish.yml`'s namespace was fixed from
+        upstream's `trombik` to this fork's `luisesn`.
+      - `README.md`'s Status section was rewritten (it previously said
+        "has not yet been verified to build or run", long stale), and a
+        new "Events instead of polling" section documents the Phase 5
+        API.
+      - **Deliberately not done here**: bumping `idf_component.yml`'s
+        version past `0.1.0` and pushing a `v*` tag. That's a real release
+        action -- it triggers `publish.yml`, which uploads to the
+        component registry using a repository secret
+        (`IDF_COMPONENT_API_TOKEN`) -- and this fork hasn't met its own
+        "MVP done" bar yet (see below: the 24h soak and 100-cycle
+        reconnect exit criteria are still outstanding, and several Phase
+        2/4/5 changes are build- but not hardware-verified). Left for the
+        repository owner to do once that bar is actually met, not
+        something to do automatically as part of writing the changelog.
 
 ### Definition of "MVP done"
 
