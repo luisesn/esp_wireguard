@@ -381,6 +381,78 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
   cycles (only 2 observed so far) — worth a longer unattended soak run
   before calling Phase 2 done and merging into `idf6-baseline`/`main`.
 
+### Hardware verification, round 2 (2026-10-28, `hwtest-phase2-phase3` at `b70ca44` + fix below)
+
+`esp-idf 6.1`, ESP32 on COM21, same hub (`norsip.com`). Serial logs were
+captured with a small pyserial script; nothing below came from the cloud
+session.
+
+- **Bug found and fixed (Phase 5 monitor vs. disconnect).** The first
+  flash of `b70ca44` boot-looped: right after the demo's first
+  `esp_wireguard_disconnect()`, the monitor task kept polling
+  `esp_wireguardif_peer_is_up()` with `ctx->netif == NULL` and hit
+  `assert failed: wireguardif_lookup_peer (netif != NULL)`. A first,
+  caller-side NULL check removed that, but a 55-minute soak then still
+  crashed once (cycle ~78, `(state != NULL)`): the monitor had read
+  `ctx->netif` just before the disconnect removed it. Final fix in
+  `src/esp_wireguard.c`: `peer_is_up` re-reads `ctx->netif` inside the
+  `tcpip_thread` callback, and `esp_wireguard_disconnect_tcpip()` sets
+  `ctx->netif = NULL` there too, so both are serialized. (Not yet
+  committed at time of writing.)
+- **Phase 2 exit criterion (100 connect/disconnect cycles): met.** After
+  the final fix, 157 cycles in 55 min continuous uptime (3299 s, no
+  reboot), no panic/assert, 157 `WIREGUARD_EVENT_PEER_UP` for 157
+  disconnects, 1569 successful pings. Heap growth was not measured.
+- **Phase 5 events: confirmed** -- `WIREGUARD_EVENT_PEER_UP` /
+  `_PEER_DOWN` appear in the log on each connect/disconnect, replacing the
+  demo's polling loop.
+- **Phase 4 MTU: 1420 holds.** `ping -M do -s 1392` over the tunnel from
+  the hub passes unfragmented (the one lost packet fell in the demo's own
+  10 s disconnected window). `-s 1422` gets no reply, as expected for a
+  packet larger than the 1420 MTU; the hub's own wg interface is 1450.
+- **Phase 3 clock wait: not observed.** The demo waits for SNTP before
+  connecting, so `esp_wireguard_connect()` never needed to block and the
+  "waiting for the clock to sync" line never printed. Needs a variant that
+  connects before SNTP completes.
+- **Phase 4 TCP throughput (30 s runs, default 1420 MTU, home WiFi, hub
+  at ~35-80 ms RTT through the tunnel):**
+  - RX (hub `dd | nc` -> ESP32): 3,477,600 B in 30 s = **113 KB/s
+    (0.93 Mbit/s)**, steady 110-124 KB/s per 2 s interval.
+  - TX (ESP32 -> hub `nc -l -p 5555 | pv`): 4,292,608 B in 30 s =
+    **139.6 KB/s (1.14 Mbit/s)** on the ESP32; the hub's `pv` counted
+    4.09 MiB (= the same 4,292,608 B), so nothing was lost.
+  - Both clean: no crash, no reboot, connection closed normally.
+  - These were window-limited, not CPU/crypto-limited: the boot log shows
+    `tcp rx win: 5760` (4 x 1440) and 5760 B / ~50 ms RTT ~= 115 KB/s,
+    matching RX. **Confirmed** by re-running with
+    `CONFIG_LWIP_TCP_WND_DEFAULT=32768`, `CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768`,
+    `CONFIG_LWIP_TCP_RECVMBOX_SIZE=24` (>= 32768/1440):
+    - TX: 15,548,416 B in 30 s = **506 KB/s (4.15 Mbit/s)**, 3.6x the
+      5760 B result; hub `pv` counted 14.8 MiB (= same bytes, no loss).
+    - RX: 11,645,820 B in 30 s = **379 KB/s (3.10 Mbit/s)**, 3.4x.
+    - The gain (3.4-3.6x) is less than the window ratio (5.7x), so a
+      second limit is now in play (WiFi, CPU for ChaCha20-Poly1305, or
+      RTT); not investigated. RAM cost of the bigger window was not
+      measured. These are the values to consider as defaults for this
+      fork's demo; they are not set in the component itself.
+  - **Bug found in the demo's test tool (not in the library):**
+    `tcp_throughput_test.c` put a 4096-byte `buf` on the stack of tasks
+    created with a 4096-byte stack, so the first `recv()` smashed the
+    heap (`assert failed: block_locate_free`, reboot on every accepted
+    connection). Fixed: heap-allocated buffer, task stack 6144.
+  - Test setup caveats: `examples/demo`'s 20 s disconnect/reconnect loop
+    would kill any TCP connection, so it is now behind
+    `CONFIG_EXAMPLE_RECONNECT_CYCLE` (default `y`; set `n` for these
+    runs). On a Debian/Ubuntu hub with netcat-traditional, the listener
+    is `nc -l -p 5555`; `nc -l 5555` silently does not listen (this cost
+    a failed run, `errno 104` on every ESP32 connect).
+  - Build is **not** warning-free as the MVP bar requires:
+    `x25519.c:218` `-Wstringop-overread` (`mul` reading 32 bytes from a
+    4-byte region) and `tcp_throughput_test.c` unused `tcp_test_tx_task`
+    when built in RX mode. Both pre-existing in this branch, not yet fixed.
+- **Still not tested:** 24 h soak across rekeys/WiFi drops, AP-drop
+  auto-reconnect, endpoint re-resolution.
+
 ## Implementation plan
 
 - [x] **Phase 0 — Preparation.** Fork cloned, compared against upstream
@@ -500,8 +572,9 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
 
   1. **Path MTU check.** From the hub, `ping -M do -s <size>
      <esp32-tunnel-ip>` (over the tunnel), sweeping `<size>` down from
-     ~1452 (1420 configured WG MTU - 28 bytes of ICMP+IPv4 header) until
-     it stops needing fragmentation, to confirm the default 1420 doesn't
+     ~1392 (1420 configured WG MTU - 28 bytes of ICMP+IPv4 header; an
+     earlier revision of this text said 1452, which is the figure for an
+     MTU of 1480) until it stops needing fragmentation, to confirm the default 1420 doesn't
      already need lowering for this specific network path (home
      WiFi/broadband, not cellular, so likely fine, but worth confirming
      rather than assuming).
