@@ -418,7 +418,11 @@ session.
   at 12.0 s, "Time synced" at 15.2 s, and only then
   `Connecting to norsip.com:51820` (15.6 s) -> `peer up` one second later,
   no handshake attempt before the clock was set and no replay rejection.
-  Not tested: the 30 s `ESP_ERR_TIMEOUT` path (SNTP never succeeding).
+  Timeout path also confirmed (`CONFIG_EXAMPLE_TEST_CLOCK_NEVER_SYNC`, SNTP
+  never started): `waiting for the clock...` at 4.0 s, then
+  `clock not synced after 30000ms, giving up` at 34.0 s ->
+  `esp_wireguard_connect: ESP_ERR_TIMEOUT`, no handshake attempted (the
+  demo then halts via its normal error path).
 - **Phase 4 TCP throughput (30 s runs, default 1420 MTU, home WiFi, hub
   at ~35-80 ms RTT through the tunnel):**
   - RX (hub `dd | nc` -> ESP32): 3,477,600 B in 30 s = **113 KB/s

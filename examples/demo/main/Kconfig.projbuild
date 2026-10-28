@@ -97,6 +97,15 @@ menu "Example Configuration"
             library's own "wait until the clock is synced" logic (CHANGES-fork.md
             issue #5) is the thing that has to hold the connection back.
 
+    config EXAMPLE_TEST_CLOCK_NEVER_SYNC
+        bool "...and never start SNTP (exercises the wait's timeout path)"
+        depends on EXAMPLE_TEST_CLOCK_WAIT
+        default n
+        help
+            With CONFIG_EXAMPLE_TEST_CLOCK_WAIT, never start SNTP at all, so
+            esp_wireguard_connect() should give up with ESP_ERR_TIMEOUT after
+            CONFIG_WIREGUARD_TIME_SYNC_TIMEOUT_MS instead of connecting.
+
     menu "TCP throughput test (Phase 4)"
         config EXAMPLE_TCP_TEST_ENABLE
             bool "Enable the TCP throughput test"

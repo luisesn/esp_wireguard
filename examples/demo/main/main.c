@@ -291,8 +291,12 @@ static void delayed_sntp_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "clock-wait test: starting SNTP in 8 s");
+#if CONFIG_EXAMPLE_TEST_CLOCK_NEVER_SYNC
+    ESP_LOGI(TAG, "clock-wait test: SNTP deliberately never started");
+#else
     vTaskDelay(pdMS_TO_TICKS(8000));
     obtain_time();
+#endif
     vTaskDelete(NULL);
 }
 #endif
