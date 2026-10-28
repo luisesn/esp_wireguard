@@ -351,6 +351,12 @@ void app_main(void)
     start_ping();
     tcp_throughput_test_start();
 
+#if !CONFIG_EXAMPLE_RECONNECT_CYCLE
+    while (1) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+#endif
+
     while (1) {
         vTaskDelay(1000 * 10 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "Disconnecting.");

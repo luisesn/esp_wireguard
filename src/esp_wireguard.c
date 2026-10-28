@@ -474,6 +474,7 @@ struct wg_disconnect_call {
     struct tcpip_api_call_data call;
     struct netif *netif;
     struct netif *netif_default;
+    wireguard_ctx_t *ctx;
 };
 
 /* Runs on tcpip_thread. See "tcpip_thread marshaling" above. Mirrors the
@@ -504,6 +505,10 @@ static err_t esp_wireguard_disconnect_tcpip(struct tcpip_api_call_data *call)
     wireguardif_fini(args->netif);
     netif_set_default(args->netif_default);
 
+    /* Cleared here, on tcpip_thread, so a concurrent esp_wireguardif_peer_is_up()
+     * (monitor task) can never see a netif that was already removed. */
+    args->ctx->netif = NULL;
+
     return ERR_OK;
 }
 
@@ -517,10 +522,10 @@ esp_err_t esp_wireguard_disconnect(wireguard_ctx_t *ctx)
         goto fail;
     }
 
+    args.ctx = ctx;
     args.netif = ctx->netif;
     args.netif_default = ctx->netif_default;
     tcpip_api_call(esp_wireguard_disconnect_tcpip, &args.call);
-    ctx->netif = NULL;
 
     err = ESP_OK;
 fail:
@@ -529,17 +534,23 @@ fail:
 
 struct wg_peer_is_up_call {
     struct tcpip_api_call_data call;
-    struct netif *netif;
+    wireguard_ctx_t *ctx;
     err_t lwip_err;
 };
 
-/* Runs on tcpip_thread. See "tcpip_thread marshaling" above. */
+/* Runs on tcpip_thread. See "tcpip_thread marshaling" above. ctx->netif is
+ * re-read here, serialized with the disconnect call, rather than trusting
+ * a pointer the caller read earlier. */
 static err_t esp_wireguardif_peer_is_up_tcpip(struct tcpip_api_call_data *call)
 {
     struct wg_peer_is_up_call *args = (struct wg_peer_is_up_call *)call;
 
+    if (args->ctx->netif == NULL) {
+        args->lwip_err = ERR_CONN;
+        return args->lwip_err;
+    }
     args->lwip_err = wireguardif_peer_is_up(
-            args->netif,
+            args->ctx->netif,
             wireguard_peer_index,
             &peer.endpoint_ip,
             &peer.endport_port);
@@ -556,7 +567,10 @@ esp_err_t esp_wireguardif_peer_is_up(wireguard_ctx_t *ctx)
         goto fail;
     }
 
-    args.netif = ctx->netif;
+    /* After esp_wireguard_disconnect() ctx->netif is NULL; the monitor task
+     * keeps polling, and wireguardif_lookup_peer() asserts on a NULL netif.
+     * No interface means no peer is up (re-checked on tcpip_thread). */
+    args.ctx = ctx;
     tcpip_api_call(esp_wireguardif_peer_is_up_tcpip, &args.call);
 
     if (args.lwip_err != ERR_OK) {

@@ -11,6 +11,7 @@
 #include "tcp_throughput_test.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
@@ -50,9 +51,14 @@ static void log_rate(const char *label, uint64_t bytes, int64_t elapsed_us)
  * to true in that case so the caller knows not to reconnect/re-accept. */
 static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
 {
-    uint8_t buf[BUF_SIZE];
+    /* Heap, not stack: BUF_SIZE is as large as the whole task stack. */
+    uint8_t *buf = malloc(BUF_SIZE);
+    if (buf == NULL) {
+        ESP_LOGE(TAG, "malloc(%d) failed", BUF_SIZE);
+        return;
+    }
     if (is_tx) {
-        memset(buf, 0xA5, sizeof(buf));
+        memset(buf, 0xA5, BUF_SIZE);
     }
 
     uint64_t total_bytes = 0;
@@ -61,8 +67,8 @@ static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
     int64_t last_log_us = start_us;
 
     while (1) {
-        ssize_t n = is_tx ? send(sock, buf, sizeof(buf), 0)
-                          : recv(sock, buf, sizeof(buf), 0);
+        ssize_t n = is_tx ? send(sock, buf, BUF_SIZE, 0)
+                          : recv(sock, buf, BUF_SIZE, 0);
         if (n <= 0) {
             /* 0 = orderly close by the peer; <0 = error (ECONNRESET and
              * similar are routine here -- the whole point of the soak
@@ -88,6 +94,7 @@ static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
     }
 
     log_rate(is_tx ? "TX (total)" : "RX (total)", total_bytes, esp_timer_get_time() - start_us);
+    free(buf);
 }
 
 static void tcp_test_rx_task(void *arg)
@@ -220,9 +227,9 @@ void tcp_throughput_test_start(void)
 {
 #if CONFIG_EXAMPLE_TCP_TEST_ENABLE
 #if CONFIG_EXAMPLE_TCP_TEST_MODE_RX
-    xTaskCreate(tcp_test_rx_task, "tcp_test_rx", 4096, NULL, 5, NULL);
+    xTaskCreate(tcp_test_rx_task, "tcp_test_rx", 6144, NULL, 5, NULL);
 #elif CONFIG_EXAMPLE_TCP_TEST_MODE_TX
-    xTaskCreate(tcp_test_tx_task, "tcp_test_tx", 4096, NULL, 5, NULL);
+    xTaskCreate(tcp_test_tx_task, "tcp_test_tx", 6144, NULL, 5, NULL);
 #endif
 #endif
 }

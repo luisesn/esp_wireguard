@@ -80,6 +80,14 @@ menu "Example Configuration"
         help
             Target IP address to send ICMP echo requests.
 
+    config EXAMPLE_RECONNECT_CYCLE
+        bool "Disconnect/reconnect the tunnel every 20 seconds"
+        default y
+        help
+            Exercises esp_wireguard_disconnect()/connect() in a loop (Phase 2
+            soak). Turn this off for a TCP throughput measurement, since each
+            disconnect tears down the interface and any TCP connection on it.
+
     menu "TCP throughput test (Phase 4)"
         config EXAMPLE_TCP_TEST_ENABLE
             bool "Enable the TCP throughput test"
