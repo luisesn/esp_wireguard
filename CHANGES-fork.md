@@ -516,11 +516,66 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
      -- this demo's `app_main()` already cycles disconnect/connect every
      20s on its own, which doubles as part of this -- watching for the
      TCP connection surviving, stalling, or needing a device reset.
-- [ ] **Phase 5 — Public API.** `esp_event` events (handshake done, peer
-      down, session expired) instead of polling; auto-reconnect on IP
-      recovery; endpoint re-resolution on reconnect (currently only
-      resolved once, at connect time); document the synced-time
-      requirement and WiFi power-save implications.
+- [x] **Phase 5 — Public API.** Done (`phase5-events-api`, merged into
+      `hwtest-phase2-phase3`), build-verified but not yet exercised on
+      real hardware:
+      - `esp_wireguard_start_monitor()` / `esp_wireguard_stop_monitor()`
+        start/stop a background task that polls
+        `esp_wireguardif_peer_is_up()` internally (the
+        wireguardif/wireguard.c library still has no up/down callback of
+        its own -- that didn't change) and posts
+        `WIREGUARD_EVENT_PEER_UP` / `WIREGUARD_EVENT_PEER_DOWN` on the
+        default event loop. The application subscribes to those instead
+        of running its own poll loop; `examples/demo/main.c` was
+        switched over as a worked example (an `EventGroupHandle_t` bit
+        set/cleared by the two events, waited on with
+        `xEventGroupWaitBits()`, replacing the old
+        `while (esp_wireguardif_peer_is_up(...) != ESP_OK) vTaskDelay(...)`
+        loops in two places).
+      - **Auto-reconnect on IP recovery**: the monitor also subscribes to
+        `IP_EVENT_STA_GOT_IP` / `IP_EVENT_ETH_GOT_IP`; if the peer is down
+        when one fires, it calls `esp_wireguard_connect()` again. This
+        needs a default event loop to already exist and an underlying
+        network interface that actually posts IP events -- the WireGuard
+        pseudo-netif itself doesn't (see the
+        `WIREGUARD_WORKAROUND_ESP_NETIF_TYPE_CONFUSION` Kconfig comment),
+        but the real WiFi/Ethernet netif underneath it does, which is
+        what matters here.
+      - **Endpoint re-resolution on reconnect**: `esp_wireguard_connect()`
+        itself now re-runs `getaddrinfo()` and calls
+        `wireguardif_update_endpoint()` on every call to an
+        already-created interface, not only the very first connect. The
+        original code resolved the peer's address exactly once and reused
+        it forever, which silently stopped working for a peer behind
+        dynamic DNS or a renumbered IP.
+      - A new `CONFIG_WIREGUARD_MONITOR_POLL_INTERVAL_MS` Kconfig knob
+        controls the monitor's poll interval (default 1000ms).
+      - The synced-time requirement was already documented on
+        `esp_wireguard_connect()` from Phase 3 (issue #5); the WiFi
+        power-save caveat (modem-sleep delaying inbound UDP enough to
+        look like handshake/keepalive flakiness, recommending
+        `esp_wifi_set_ps(WIFI_PS_NONE)`) is now documented alongside it
+        and on `esp_wireguard_start_monitor()`.
+      - **What this does NOT cover**: a separate "session expired" event
+        distinct from "peer down" -- the underlying library doesn't
+        report *why* a peer went down (planned disconnect vs. a rekey
+        that failed to complete in time), so both surface as the same
+        `WIREGUARD_EVENT_PEER_DOWN`; an application that needs to tell
+        them apart has to track whether it called
+        `esp_wireguard_disconnect()` itself. Also untested: whether the
+        IP-recovery reconnect and the demo's own manual
+        disconnect/reconnect cycle (already in `app_main()`'s loop,
+        originally for Phase 2/4 soak testing) can race each other if a
+        real WiFi drop happens to land in the 20s window the demo is
+        already mid-cycle -- plausible in theory, not something this
+        cloud session can reproduce without a real WiFi radio to drop.
+      - Build-verified: `examples/demo`, esp32 target, full clean
+        rebuild, both with the Phase 4 TCP test disabled and with it
+        enabled (RX mode) alongside the new event-based code, to confirm
+        the two phases' changes coexist. The esp32s2/s3/c3 cross-targets
+        from Phase 6's planned build matrix could not be verified here --
+        this sandbox only has the xtensa (esp32) toolchain installed, not
+        the RISC-V one the other three targets need.
 - [ ] **Phase 6 — Tests and CI.** Rewrite `.github/workflows/build.yml`
       for `esp-idf 6.0.x` only, across `esp32`/`esp32s2`/`esp32s3`/
       `esp32c3`; host-side unit tests in CI; hardware-in-the-loop tests
