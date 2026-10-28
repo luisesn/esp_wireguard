@@ -2,7 +2,15 @@
 version: "0.1.0"
 description: WireGuard Implementation for ESP-IDF (fork targeting esp-idf >= 6.0, esp32 family only)
 url: https://github.com/luisesn/esp_wireguard
+repository: https://github.com/luisesn/esp_wireguard.git
+documentation: https://github.com/luisesn/esp_wireguard/blob/main/README.md
+issues: https://github.com/luisesn/esp_wireguard/issues
 license: BSD-3-Clause
+tags:
+  - wireguard
+  - vpn
+  - networking
+  - security
 dependencies:
   idf: ">=6.0"
 targets:

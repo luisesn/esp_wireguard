@@ -1,0 +1,107 @@
+menu "Example Configuration"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "myssid"
+        help
+            SSID (network name) for the example to connect to.
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default "mypassword"
+        help
+            WiFi password (WPA or WPA2) for the example to use.
+
+    config ESP_MAXIMUM_RETRY
+        int "Maximum retry"
+        default 5
+        help
+            Set the Maximum retry to avoid station reconnecting to the AP
+            unlimited when the AP is really inexistent.
+
+    config WG_PRIVATE_KEY
+        string "Wireguard Private Key"
+        default "IsvT72MAXzA8EtV0FSD1QT59B4x0oe6Uea5rd/dDzhE="
+        help
+            Private key of the WireGuard device.
+
+    config WG_LOCAL_IP_ADDRESS
+        string "Wireguard local IP address"
+        default "192.168.4.58"
+        help
+            Local IP address of the WireGuard device.
+
+    config WG_LOCAL_IP_NETMASK
+        string "Wireguard local netmask"
+        default "255.255.255.0"
+        help
+            Netmask of the local network the WireGuard device belongs to.
+
+    config WG_LOCAL_PORT
+        int "Wireguard local port"
+        default 11010
+        help
+            Local port to listen.
+
+    config WG_PEER_PUBLIC_KEY
+        string "Wireguard remote peer public key"
+        default "FjrsQ/HD1Q8fUlFILIasDlOuajMeZov4NGqMJpkswiw="
+        help
+            Public key of the remote peer.
+
+    config WG_PRESHARED_KEY
+        string "Wireguard pre-shared symmetric key"
+        default ""
+        help
+            Optional pre-shared key of the remote peer. Leave empty to
+            disable.
+
+    config WG_PEER_ADDRESS
+        string "Wireguard remote peer address"
+        default "demo.wireguard.com"
+        help
+            Address of the remote peer.
+
+    config WG_PEER_PORT
+        int "Wireguard remote peer port"
+        default 51820
+        help
+            Port number of the remote peer.
+
+    config WG_PERSISTENT_KEEP_ALIVE
+        int "Interval to send an authenticated empty packet"
+        default 0
+        help
+            A seconds interval, between 1 and 65535 inclusive, of how often to
+            send an authenticated empty packet to the peer for the purpose of
+            keeping a stateful firewall or NAT mapping valid persistently.
+            Set to 0 to disable.
+
+    config EXAMPLE_TCP_SERVER_ADDRESS
+        string "Peer's tunnel IP address of the TCP service to reach"
+        default "10.252.1.1"
+        help
+            This example is a minimal point-to-point TCP *client*: it
+            connects out, over the tunnel, to a plain TCP service already
+            running on the peer at this tunnel address -- it does not run a
+            server itself. Anything that accepts a TCP connection and
+            echoes or responds to what it's sent will do for trying this
+            out (e.g. `nc -l <port>` on the peer, or your own service).
+
+    config EXAMPLE_TCP_SERVER_PORT
+        int "TCP port of the service to reach"
+        default 5555
+
+    config EXAMPLE_TCP_MESSAGE
+        string "Message to send on each connection"
+        default "hello from esp_wireguard\n"
+
+    config EXAMPLE_TCP_RETRY_INTERVAL_SEC
+        int "Seconds between connection attempts"
+        default 10
+        help
+            How long to wait after each attempt (successful or not) before
+            connecting again. This example reconnects on a timer rather
+            than holding one connection open, to keep it simple -- see
+            examples/demo for a long-lived-connection soak test instead.
+endmenu

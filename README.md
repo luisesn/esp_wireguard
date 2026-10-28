@@ -14,8 +14,16 @@ upstream project above for the general-purpose version.
 
 ## Status
 
-The code is alpha. This fork has not yet been verified to build or run; see
-[CHANGES-fork.md](CHANGES-fork.md) for current progress.
+The code is alpha, but actively built and tested: every change in this
+fork is build-verified (CI: `esp32`/`esp32s2`/`esp32s3`/`esp32c3`, plus a
+host-side crypto test suite and packet-parser fuzzer — see
+[.github/workflows/build.yml](.github/workflows/build.yml)), and the core
+netif-locking fix has been confirmed against real hardware. Several newer
+changes (the TCP throughput test, the Phase 5 events/auto-reconnect API)
+are build-verified but not yet exercised against real hardware. See
+[CHANGES-fork.md](CHANGES-fork.md) for exactly what has and hasn't been
+hardware-tested, and [CHANGELOG.md](CHANGELOG.md) for a chronological
+summary.
 
 A single tunnel to a WireGuard peer has been working in upstream.
 
@@ -87,7 +95,45 @@ else {
 err = esp_wireguard_disconnect(&ctx);
 ```
 
-See examples at [examples](examples).
+See examples at [examples](examples): [examples/demo](examples/demo) is a
+fuller worked example (also exercising ICMP, a throughput test, and a
+disconnect/reconnect soak loop); [examples/tcp_client](examples/tcp_client)
+is a minimal point-to-point TCP client, closer to what a real
+single-purpose deployment of this fork looks like.
+
+## Events instead of polling
+
+Rather than polling `esp_wireguardif_peer_is_up()` in a loop, call
+`esp_wireguard_start_monitor()` after `esp_wireguard_connect()` and
+subscribe to `WIREGUARD_EVENT` on the default event loop:
+
+```c
+static void wg_event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data)
+{
+    if (event_base != WIREGUARD_EVENT) {
+        return;
+    }
+    if (event_id == WIREGUARD_EVENT_PEER_UP) {
+        /* the link is up */
+    } else if (event_id == WIREGUARD_EVENT_PEER_DOWN) {
+        /* the link is down */
+    }
+}
+
+esp_event_handler_instance_register(WIREGUARD_EVENT, ESP_EVENT_ANY_ID,
+        &wg_event_handler, NULL, NULL);
+esp_wireguard_start_monitor(&ctx);
+```
+
+This also gets you two things a manual poll loop doesn't: the tunnel
+automatically reconnects when the underlying network interface regains an
+IP address (e.g. after a WiFi drop/reconnect), and the peer's endpoint
+hostname is re-resolved on every reconnect rather than only once at the
+very first connect (useful behind dynamic DNS or a peer that gets
+renumbered). See `esp_wireguard_start_monitor()`'s doc comment in
+[include/esp_wireguard.h](include/esp_wireguard.h) for the details and
+caveats (notably WiFi power-save).
 
 ## IPv6 support
 
