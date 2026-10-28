@@ -17,5 +17,9 @@ jobs:
         with:
           name: "esp_wireguard"
           version: ${{ github.ref_name }}
-          namespace: "trombik"
+          # This fork publishes under its own namespace, not upstream's
+          # ("trombik") -- this repo has no permission to overwrite that
+          # listing, and publishing a narrower-scope fork under the
+          # original author's name would be misleading regardless.
+          namespace: "luisesn"
           api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
