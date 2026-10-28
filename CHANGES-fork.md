@@ -410,10 +410,15 @@ session.
   the hub passes unfragmented (the one lost packet fell in the demo's own
   10 s disconnected window). `-s 1422` gets no reply, as expected for a
   packet larger than the 1420 MTU; the hub's own wg interface is 1450.
-- **Phase 3 clock wait: not observed.** The demo waits for SNTP before
-  connecting, so `esp_wireguard_connect()` never needed to block and the
-  "waiting for the clock to sync" line never printed. Needs a variant that
-  connects before SNTP completes.
+- **Phase 3 clock wait: confirmed on hardware.** The stock demo waits for
+  SNTP first, so the wait never triggered. New
+  `CONFIG_EXAMPLE_TEST_CLOCK_WAIT` (default `n`) skips that wait and starts
+  SNTP 8 s later from another task. Boot log: `esp_wireguard_connect:
+  waiting for the clock to sync before connecting` at t=4.0 s, SNTP starts
+  at 12.0 s, "Time synced" at 15.2 s, and only then
+  `Connecting to norsip.com:51820` (15.6 s) -> `peer up` one second later,
+  no handshake attempt before the clock was set and no replay rejection.
+  Not tested: the 30 s `ESP_ERR_TIMEOUT` path (SNTP never succeeding).
 - **Phase 4 TCP throughput (30 s runs, default 1420 MTU, home WiFi, hub
   at ~35-80 ms RTT through the tunnel):**
   - RX (hub `dd | nc` -> ESP32): 3,477,600 B in 30 s = **113 KB/s

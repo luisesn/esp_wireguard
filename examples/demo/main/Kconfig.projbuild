@@ -88,6 +88,15 @@ menu "Example Configuration"
             soak). Turn this off for a TCP throughput measurement, since each
             disconnect tears down the interface and any TCP connection on it.
 
+    config EXAMPLE_TEST_CLOCK_WAIT
+        bool "Test esp_wireguard_connect()'s wait for the clock to sync"
+        default n
+        help
+            Skips waiting for SNTP before calling esp_wireguard_connect(), and
+            starts SNTP only 8 seconds later from a separate task, so the
+            library's own "wait until the clock is synced" logic (CHANGES-fork.md
+            issue #5) is the thing that has to hold the connection back.
+
     menu "TCP throughput test (Phase 4)"
         config EXAMPLE_TCP_TEST_ENABLE
             bool "Enable the TCP throughput test"

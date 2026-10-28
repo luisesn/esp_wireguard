@@ -286,6 +286,17 @@ void start_ping()
     esp_ping_start(ping);
 }
 
+#if CONFIG_EXAMPLE_TEST_CLOCK_WAIT
+static void delayed_sntp_task(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "clock-wait test: starting SNTP in 8 s");
+    vTaskDelay(pdMS_TO_TICKS(8000));
+    obtain_time();
+    vTaskDelete(NULL);
+}
+#endif
+
 void app_main(void)
 {
     esp_err_t err;
@@ -310,7 +321,11 @@ void app_main(void)
         goto fail;
     }
 
+#if CONFIG_EXAMPLE_TEST_CLOCK_WAIT
+    xTaskCreate(delayed_sntp_task, "delayed_sntp", 4096, NULL, 5, NULL);
+#else
     obtain_time();
+#endif
     time(&now);
 
     setenv("TZ", "EST5EDT,M3.2.0/2,M11.1.0", 1);
