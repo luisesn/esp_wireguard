@@ -20,9 +20,17 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "src"
     REQUIRES esp_netif esp_event lwip mbedtls)
 
-# Known false positive from GCC's -Wstringop-overread against this file's
-# pointer arithmetic; kept as a targeted suppression rather than a blanket
-# one so a real regression elsewhere still fails the build.
+# Known false positive from GCC's -Wstringop-overread against mul()'s
+# call in ladder_part1() (src/crypto/refc/x25519.c:218): mul() is called
+# with nb=1 and only reads b[0], but GCC's diagnostic goes off the
+# parameter's declared type (`const fe b`, i.e. `const limb_t[NLIMBS]`,
+# NLIMBS=8) rather than the runtime `nb` bound, so it reports a read past
+# the 1-element `a24` array actually passed in -- a read that never
+# happens. -Wno-error= alone (an earlier version of this suppression)
+# only demoted it to a non-fatal warning; fully silencing it here, rather
+# than leaving a warning the MVP bar (CHANGES-fork.md) calls for a clean
+# build, is deliberate and scoped to just this file so a real regression
+# elsewhere still fails the build.
 set_source_files_properties(src/crypto/refc/x25519.c
     PROPERTIES COMPILE_FLAGS
-    -Wno-error=stringop-overread)
+    -Wno-stringop-overread)
