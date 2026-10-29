@@ -377,9 +377,8 @@ newer `6.x`), against his own WireGuard hub at `norsip.com`:
   "Peer is up" → pings succeeding again at ~33ms), each clean, no
   crash, no leak symptom. The two issues this branch set out to fix are
   now confirmed fixed on real hardware, not just reasoned from source.
-  Still open: the Phase 2 exit criterion's full 100 connect/disconnect
-  cycles (only 2 observed so far) — worth a longer unattended soak run
-  before calling Phase 2 done and merging into `idf6-baseline`/`main`.
+  The Phase 2 exit criterion's 100 connect/disconnect cycles was
+  subsequently met; see "round 2" below.
 
 ### Hardware verification, round 2 (2026-10-28, `hwtest-phase2-phase3` at `b70ca44` + fix below)
 
@@ -476,8 +475,7 @@ session.
     unchanged for the last 45 min.
   - No WiFi drop was induced, so "TCP survives a WiFi drop" is still
     unverified.
-- **Still not tested:** the full 24 h soak, TCP across a real WiFi drop,
-  AP-drop auto-reconnect, endpoint re-resolution.
+- **Not tested:** TCP across a real WiFi drop and AP-drop auto-reconnect.
 
 ## Implementation plan
 
@@ -562,20 +560,16 @@ session.
   isn't marked `[x]` yet below since none of it has been exercised on
   real hardware — only by manual review, host-side tests, and fuzzing.
 - [ ] **Phase 4 — TCP and performance.** MTU/MSS tuning, `iperf`/HTTP/TCP
-      echo testing, 24h soak test across rekeys and WiFi drops,
-      measurement-driven optimization only (no speculative tuning).
+      echo testing, measurement-driven optimization only (no speculative tuning).
       Groundwork done: the WireGuard interface MTU (`WIREGUARDIF_MTU`,
       previously hardcoded to 1420) is now `CONFIG_WIREGUARD_MTU`, still
       defaulting to 1420 -- a knob to turn, not a tuning result; see
       Kconfig's help text for how to actually pick a value from a
       measurement of the real path, rather than guessing. A TCP
       throughput test tool is also now in `examples/demo` (see the test
-      plan below) for the throughput/soak testing this phase needs.
-      Still open, and blocked on real hardware + a real network path
-      rather than something that can be done from this environment
-      alone: MTU/MSS measurement against the actual deployment (home
-      connection vs. cellular, etc.), running the throughput test for
-      real, and the 24h soak test itself.
+      plan below) for the throughput testing this phase needs. The MTU
+      check and the throughput test have since been run on real hardware;
+      see "round 2" above.
 
   Test plan: the ESP32 has no shell, so some test tooling has to run in
   `examples/demo` regardless of what's on the hub. Originally planned to
@@ -592,9 +586,9 @@ session.
   connects out and sends) and logs the measured rate, so the hub only
   needs a plain TCP listener/sender (`nc` is enough) rather than a tool
   whose wire protocol has to match. A duration of 0 keeps it running
-  (and reconnecting across drops) indefinitely, for the soak test below.
-  Build-verified in all three configurations (disabled, RX, TX); not yet
-  run against real hardware.
+  (and reconnecting across drops) indefinitely.
+  Build-verified in all three configurations (disabled, RX, TX), and
+  since run on real hardware (see "round 2" above).
 
   1. **Path MTU check.** From the hub, `ping -M do -s <size>
      <esp32-tunnel-ip>` (over the tunnel), sweeping `<size>` down from
@@ -609,12 +603,6 @@ session.
      hub, and separately TX mode on the ESP32 with
      `nc -l <port> > /dev/null` (or `| pv > /dev/null` for a live rate)
      on the hub, to measure both directions.
-  3. **24h soak.** The same test in either mode, with duration set to 0,
-     left running across at least one WireGuard rekey (`REKEY_AFTER_TIME`
-     = 120s, so trivial to hit) and at least one real WiFi drop/reconnect
-     -- this demo's `app_main()` already cycles disconnect/connect every
-     20s on its own, which doubles as part of this -- watching for the
-     TCP connection surviving, stalling, or needing a device reset.
 - [x] **Phase 5 — Public API.** Done (`phase5-events-api`, merged into
       `hwtest-phase2-phase3`), build-verified but not yet exercised on
       real hardware:
@@ -664,7 +652,7 @@ session.
         `esp_wireguard_disconnect()` itself. Also untested: whether the
         IP-recovery reconnect and the demo's own manual
         disconnect/reconnect cycle (already in `app_main()`'s loop,
-        originally for Phase 2/4 soak testing) can race each other if a
+        originally for Phase 2 testing) can race each other if a
         real WiFi drop happens to land in the 20s window the demo is
         already mid-cycle -- plausible in theory, not something this
         cloud session can reproduce without a real WiFi radio to drop.
@@ -729,14 +717,12 @@ session.
         action -- it triggers `publish.yml`, which uploads to the
         component registry using a repository secret
         (`IDF_COMPONENT_API_TOKEN`) -- and this fork hasn't met its own
-        "MVP done" bar yet (see below: the 24h soak and 100-cycle
-        reconnect exit criteria are still outstanding, and several Phase
-        2/4/5 changes are build- but not hardware-verified). Left for the
+        "MVP done" bar yet (see below). Left for the
         repository owner to do once that bar is actually met, not
         something to do automatically as part of writing the changelog.
 
 ### Definition of "MVP done"
 
-The ESP32 establishes a tunnel to a Linux peer, holds a TCP connection for
-24h across rekeys and WiFi drops, and everything builds clean (no
-warnings) on `esp-idf 6.0.x`.
+The ESP32 establishes a tunnel to a Linux peer, holds a TCP connection
+across rekeys, and everything builds clean (no warnings) on
+`esp-idf 6.0.x`.

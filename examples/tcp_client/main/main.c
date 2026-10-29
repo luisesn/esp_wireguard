@@ -8,7 +8,7 @@
    a single known peer -- not a full VPN gateway example. See
    examples/demo for a larger example that also exercises ICMP, a
    configurable-duration throughput test, events/auto-reconnect, and a
-   disconnect/reconnect soak loop.
+   disconnect/reconnect loop.
 
    This example code is in the Public Domain (or CC0 licensed, at your
    option.)

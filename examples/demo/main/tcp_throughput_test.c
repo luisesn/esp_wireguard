@@ -1,5 +1,5 @@
 /* TCP throughput test for CHANGES-fork.md's Phase 4 (MTU/MSS tuning,
- * throughput testing, 24h soak). See tcp_throughput_test.h and
+ * throughput testing). See tcp_throughput_test.h and
  * Kconfig.projbuild ("TCP throughput test (Phase 4)") for the rationale:
  * this is deliberately a plain byte-pump, not an iperf reimplementation,
  * so the far end only needs a generic TCP listener/sender (`nc` is
@@ -49,7 +49,7 @@ static void log_rate(const char *label, uint64_t bytes, int64_t elapsed_us)
  * Returns when the connection ends (peer closed, error) or, for a
  * bounded test (duration_sec > 0), when the duration elapses -- in which
  * case the caller is expected to stop entirely (a bounded run is a
- * one-shot test, not a stage of the soak loop). *stop_requested is set
+ * one-shot test, not a stage of a longer run). *stop_requested is set
  * to true in that case so the caller knows not to reconnect/re-accept. */
 static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
 {
@@ -73,7 +73,7 @@ static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
                           : recv(sock, buf, BUF_SIZE, 0);
         if (n <= 0) {
             /* 0 = orderly close by the peer; <0 = error (ECONNRESET and
-             * similar are routine here -- the whole point of the soak
+             * similar are routine here -- the whole point of a long run
              * test is to survive the tunnel dropping and reconnecting
              * underneath this socket, so this is not logged as an
              * error, just as the end of this connection). */
@@ -163,7 +163,7 @@ static void tcp_test_rx_task(void *arg)
             ESP_LOGI(TAG, "RX mode: test duration reached, stopping");
             break;
         }
-        /* duration_sec == 0 (soak mode): the listening socket was closed
+        /* duration_sec == 0 (run-forever mode): the listening socket was closed
          * above only because the single connection we were pumping
          * ended -- go re-create it and accept again, so a WireGuard
          * rekey/reconnect (which doesn't itself touch this TCP
@@ -216,7 +216,7 @@ static void tcp_test_tx_task(void *arg)
             ESP_LOGI(TAG, "TX mode: test duration reached, stopping");
             break;
         }
-        /* duration_sec == 0 (soak mode): reconnect and keep sending, the
+        /* duration_sec == 0 (run-forever mode): reconnect and keep sending, the
          * same way the RX side keeps re-accepting -- see the comment
          * there. */
         vTaskDelay(pdMS_TO_TICKS(1000));

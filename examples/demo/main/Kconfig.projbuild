@@ -84,8 +84,8 @@ menu "Example Configuration"
         bool "Disconnect/reconnect the tunnel every 20 seconds"
         default y
         help
-            Exercises esp_wireguard_disconnect()/connect() in a loop (Phase 2
-            soak). Turn this off for a TCP throughput measurement, since each
+            Exercises esp_wireguard_disconnect()/connect() in a loop (Phase 2).
+            Turn this off for a TCP throughput measurement, since each
             disconnect tears down the interface and any TCP connection on it.
 
     config EXAMPLE_TEST_CLOCK_WAIT
@@ -113,7 +113,7 @@ menu "Example Configuration"
             help
                 Runs a simple TCP throughput test over the WireGuard tunnel
                 once the peer is up, for CHANGES-fork.md's Phase 4
-                (MTU/MSS tuning, throughput testing, 24h soak). This is
+                (MTU/MSS tuning, throughput testing). This is
                 deliberately not iperf or anything protocol-specific: it
                 just moves bytes as fast as it can in one direction and
                 logs the measured rate, so the far end only needs a plain
@@ -164,9 +164,7 @@ menu "Example Configuration"
             help
                 How long to run before closing the connection and
                 reporting a final rate. 0 keeps the connection open
-                indefinitely instead (useful for the 24h soak test, run
-                alongside the normal connect/disconnect cycling already in
-                this demo's app_main()) -- in that case only the periodic
+                indefinitely instead -- in that case only the periodic
                 rate logging applies, not a final summary.
     endmenu
 endmenu

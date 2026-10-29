@@ -97,7 +97,7 @@ err = esp_wireguard_disconnect(&ctx);
 
 See examples at [examples](examples): [examples/demo](examples/demo) is a
 fuller worked example (also exercising ICMP, a throughput test, and a
-disconnect/reconnect soak loop); [examples/tcp_client](examples/tcp_client)
+disconnect/reconnect loop); [examples/tcp_client](examples/tcp_client)
 is a minimal point-to-point TCP client, closer to what a real
 single-purpose deployment of this fork looks like.
 

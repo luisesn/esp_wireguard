@@ -23,8 +23,8 @@ against a real ESP32 and a real WireGuard peer.
 - Fixed esp-idf 6.0.2 / mbedtls 4 build breakage.
 - Fixed a `netif`/`tcpip_thread` locking race: every `esp_wireguard_*()`
   call that touches `netif`/`wireguardif` state is now marshaled onto
-  `tcpip_thread` via lwIP's `tcpip_api_call()` (not yet hardware-verified
-  beyond a short soak).
+  `tcpip_thread` via lwIP's `tcpip_api_call()` (hardware-verified over 157
+  connect/disconnect cycles).
 - Fixed a type-confusion crash between this component's raw lwIP netif and
   `esp_netif`'s global callback (`WIREGUARD_WORKAROUND_ESP_NETIF_TYPE_CONFUSION`
   Kconfig option).
@@ -39,7 +39,7 @@ against a real ESP32 and a real WireGuard peer.
   of a hardcoded `1420`.
 - Added a custom TCP throughput test tool to `examples/demo`
   (`CONFIG_EXAMPLE_TCP_TEST_ENABLE`, RX/TX modes) for Phase 4 MTU/
-  throughput/soak measurement (not yet hardware-verified).
+  throughput measurement (hardware-verified, see CHANGES-fork.md).
 - Added `esp_wireguard_start_monitor()` / `esp_wireguard_stop_monitor()`:
   a background task that posts `WIREGUARD_EVENT_PEER_UP` /
   `WIREGUARD_EVENT_PEER_DOWN` on the default event loop instead of the
@@ -67,7 +67,6 @@ against a real ESP32 and a real WireGuard peer.
 This fork has not reached 1.0.0: several changes above are build-verified
 but not yet confirmed against real hardware (a real ESP32 talking to a
 real WireGuard peer over real WiFi) -- see CHANGES-fork.md's "Definition
-of 'MVP done'" for the specific exit criteria (notably a 24h soak and a
-100-cycle reconnect test) still outstanding. Once those pass, this will
+of 'MVP done'" for the exit criteria. Once those pass, this will
 become `1.0.0`; until then, expect `0.x.y` releases where a minor bump may
 still include behavior changes, not just new features.

@@ -103,5 +103,5 @@ menu "Example Configuration"
             How long to wait after each attempt (successful or not) before
             connecting again. This example reconnects on a timer rather
             than holding one connection open, to keep it simple -- see
-            examples/demo for a long-lived-connection soak test instead.
+            examples/demo for a long-lived-connection test instead.
 endmenu
