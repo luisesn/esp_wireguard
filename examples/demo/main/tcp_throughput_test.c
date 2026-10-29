@@ -101,6 +101,7 @@ static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
     free(buf);
 }
 
+#if CONFIG_EXAMPLE_TCP_TEST_MODE_RX
 static void tcp_test_rx_task(void *arg)
 {
     (void)arg;
@@ -174,7 +175,9 @@ static void tcp_test_rx_task(void *arg)
 
     vTaskDelete(NULL);
 }
+#endif /* CONFIG_EXAMPLE_TCP_TEST_MODE_RX */
 
+#if CONFIG_EXAMPLE_TCP_TEST_MODE_TX
 static void tcp_test_tx_task(void *arg)
 {
     (void)arg;
@@ -224,6 +227,7 @@ static void tcp_test_tx_task(void *arg)
 
     vTaskDelete(NULL);
 }
+#endif /* CONFIG_EXAMPLE_TCP_TEST_MODE_TX */
 
 #endif /* CONFIG_EXAMPLE_TCP_TEST_ENABLE */
 
