@@ -454,10 +454,18 @@ session.
     runs). On a Debian/Ubuntu hub with netcat-traditional, the listener
     is `nc -l -p 5555`; `nc -l 5555` silently does not listen (this cost
     a failed run, `errno 104` on every ESP32 connect).
-  - Build is **not** warning-free as the MVP bar requires:
-    `x25519.c:218` `-Wstringop-overread` (`mul` reading 32 bytes from a
-    4-byte region) and `tcp_throughput_test.c` unused `tcp_test_tx_task`
-    when built in RX mode. Both pre-existing in this branch, not yet fixed.
+  - Build is **now** warning-free, as the MVP bar requires (branch
+    `warnings-cleanup`, merged into `hwtest-phase2-phase3`): fixed
+    `x25519.c:218`'s `-Wstringop-overread` false positive (fully silenced
+    with `-Wno-stringop-overread`, not just demoted to non-fatal with
+    `-Wno-error=`), `tcp_throughput_test.c`'s unused `tcp_test_tx_task`/
+    `tcp_test_rx_task` (each is now compiled only for its own mode), and
+    a third, previously-unlisted one found while fixing the other two:
+    an unused `unsigned int i` in the vendored NaCl
+    `smult.c::mainloop()`. Build-verified, esp32, zero warnings in
+    `examples/demo` (default config, RX, and TX) and `examples/tcp_client`.
+    Not yet re-confirmed on real hardware (the two listed above were
+    found there; only build-verified again here).
 - **Phase 4 soak, 2 h configuration (RX, window 32 KB, no reconnect
   cycle, `CONFIG_EXAMPLE_TCP_TEST_DURATION_SEC=7200`, heap logged every
   2 s).** The serial capture covered **84 min of one continuous TCP
