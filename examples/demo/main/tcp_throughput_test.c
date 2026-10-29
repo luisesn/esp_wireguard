@@ -23,6 +23,8 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_system.h>
+#include <inttypes.h>
 
 #if CONFIG_EXAMPLE_TCP_TEST_ENABLE
 
@@ -83,6 +85,8 @@ static void pump(int sock, bool is_tx, int duration_sec, bool *stop_requested)
         int64_t now_us = esp_timer_get_time();
         if (now_us - last_log_us >= LOG_INTERVAL_US) {
             log_rate(is_tx ? "TX (interval)" : "RX (interval)", bytes_since_log, now_us - last_log_us);
+            ESP_LOGI(TAG, "heap free: %" PRIu32 " min: %" PRIu32,
+                     esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
             bytes_since_log = 0;
             last_log_us = now_us;
         }

@@ -459,8 +459,25 @@ session.
     `x25519.c:218` `-Wstringop-overread` (`mul` reading 32 bytes from a
     4-byte region) and `tcp_throughput_test.c` unused `tcp_test_tx_task`
     when built in RX mode. Both pre-existing in this branch, not yet fixed.
-- **Still not tested:** 24 h soak across rekeys/WiFi drops, AP-drop
-  auto-reconnect, endpoint re-resolution.
+- **Phase 4 soak, 2 h configuration (RX, window 32 KB, no reconnect
+  cycle, `CONFIG_EXAMPLE_TCP_TEST_DURATION_SEC=7200`, heap logged every
+  2 s).** The serial capture covered **84 min of one continuous TCP
+  stream** (12:30:17 - 13:55, i.e. ~42 WireGuard rekeys at 120 s; the
+  capture was shorter than the 2 h test because the hub stream started
+  45 min after boot, so the final summary line and the last ~35 min were
+  not captured):
+  - 2518 two-second intervals, 311-407 KB/s, mean **373 KB/s**, no
+    degradation over time.
+  - No reboot (the only reset in the log is the capture's own at start),
+    no assert/panic/error lines; ping and the TCP stream continued through
+    every rekey.
+  - Heap: average free 174.8 KB -> 176.1 KB across the run (flat, no leak
+    trend); minimum-ever free 151.7 KB early and 150.9 KB from ~13:10 on,
+    unchanged for the last 45 min.
+  - No WiFi drop was induced, so "TCP survives a WiFi drop" is still
+    unverified.
+- **Still not tested:** the full 24 h soak, TCP across a real WiFi drop,
+  AP-drop auto-reconnect, endpoint re-resolution.
 
 ## Implementation plan
 
